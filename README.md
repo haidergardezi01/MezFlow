@@ -185,7 +185,6 @@ npm run dev -- -p 3001
 
 ## 👥 Authors & Team Structure
 
-Developed as a Final Year Project (FYP) at SZABIST Islamabad Campus under the supervision of **Muhammad Farooq**:
 
 * **Sheikh Muhammad Khizar** — Full-Stack Developer (Auth, Billing, AI Module, Management Console)
 
