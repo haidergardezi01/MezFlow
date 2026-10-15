@@ -1,7 +1,3 @@
-Here is a complete, polished `README.md` file designed for your GitHub repository. It clearly presents the project overview, key features, technology stack, project structure, quickstart setup guide, and project roadmap.
-
----
-
 # MezFlow — Real-Time Restaurant Dining & Kitchen Operations Management System
 
 > **A synchronized, zero-install web platform connecting customer ordering, single-screen kitchen display operations, and table lifecycle management for small and medium restaurants.**
