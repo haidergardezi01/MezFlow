@@ -1,6 +1,6 @@
 # MezFlow — Real-Time Restaurant Dining & Kitchen Operations Management System
 
-> **A synchronized, zero-install web platform connecting customer ordering, single-screen kitchen display operations, and table lifecycle management for small and medium restaurants.**
+> **A synchronized, zero-install web platform connecting customer ordering, single-screen kitchen display operations, and table lifecycle management for small and medium size restaurants.**
 
 ---
 
