@@ -19,7 +19,7 @@ class User(BaseModel):
     restaurant_id = Column(UUID(as_uuid=True), ForeignKey("restaurants.id", ondelete="CASCADE"), nullable=False, index=True)
     email = Column(String(255), nullable=True, index=True)
     phone_number = Column(String(50), nullable=True, index=True)
-    hashed_password = Column(String(255), nullable=False)
+    hashed_password = Column(String(255), nullable=True)
     role = Column(SQLEnum(UserRole), default=UserRole.CUSTOMER, nullable=False, index=True)
     is_active = Column(Boolean, default=True, nullable=False)
     is_verified = Column(Boolean, default=False, nullable=False)

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, Union
 from uuid import UUID
 from pydantic import BaseModel, EmailStr, Field, ConfigDict
 from app.models.user import UserRole
@@ -10,13 +10,22 @@ class UserSignupRequest(BaseModel):
     display_name: str = Field(..., min_length=2, max_length=100)
     email: Optional[EmailStr] = None
     phone_number: Optional[str] = None
-    password: Optional[str] = Field(None, min_length=6)
+    password: str = Field(..., min_length=6)
     preferred_language: str = Field("en", pattern="^(en|ur)$")
-    role: Optional[UserRole] = UserRole.CUSTOMER
+
+
+class StaffCreateRequest(BaseModel):
+    restaurant_id: UUID
+    display_name: str = Field(..., min_length=2, max_length=100)
+    email: EmailStr
+    phone_number: Optional[str] = None
+    password: str = Field(..., min_length=6)
+    role: UserRole = Field(..., description="Staff role (manager, kitchen_staff, service_staff, cashier)")
+    preferred_language: str = Field("en", pattern="^(en|ur)$")
 
 
 class UserLoginPasswordRequest(BaseModel):
-    restaurant_id: UUID
+    restaurant_id: Optional[UUID] = Field(None, description="Optional: specific restaurant scope")
     username: str = Field(..., description="Email address or phone number")
     password: str = Field(..., min_length=4)
 
@@ -63,7 +72,7 @@ class UserResponse(BaseModel):
     restaurant_id: UUID
     email: Optional[str] = None
     phone_number: Optional[str] = None
-    role: str
+    role: Union[UserRole, str]
     is_active: bool
     is_verified: bool
     profile: Optional[UserProfileResponse] = None

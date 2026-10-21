@@ -9,6 +9,31 @@ on:
 jobs:
   backend-test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: mezflow_test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -25,6 +50,12 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run Pytest
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/mezflow_test_db
+          POSTGRES_PORT: 5432
+          REDIS_URL: redis://localhost:6379/0
+          ENVIRONMENT: test
+          DEBUG: false
         run: |
           cd backend
           pytest

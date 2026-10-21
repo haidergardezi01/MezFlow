@@ -44,6 +44,7 @@ services:
         condition: service_healthy
     environment:
       - ENVIRONMENT=production
+      - DEBUG=False
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-mezflow_db}
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY:-default_secret_for_local_dev_change_in_prod}

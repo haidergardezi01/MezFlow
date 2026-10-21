@@ -34,6 +34,14 @@ class Settings(BaseSettings):
         "http://127.0.0.1:3001",
     ]
 
+    @field_validator("DEBUG", mode="after")
+    @classmethod
+    def validate_debug(cls, v: bool, info) -> bool:
+        env = info.data.get("ENVIRONMENT", "development")
+        if env == "production":
+            return False
+        return v
+
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod
     def assemble_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:

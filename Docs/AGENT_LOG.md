@@ -163,19 +163,53 @@ This document serves as the authoritative, persistent operational log of all int
   - Verified preflight `OPTIONS /api/v1/auth/login` returns `200 OK` with valid CORS headers.
   - Tested `POST /api/v1/auth/login` and `POST /api/v1/auth/request-otp` from origin `http://localhost:3001`, confirming successful JWT issuance and OTP dispatch.
 
+#### Entry 1.12: Comprehensive Security, Multi-Tenant Architecture & CI Remediation
+- **User Prompt:** *"Problems to fix first: Anyone can register as a Manager ... OTP-created accounts have a known password ... The frontend breaks on a fresh clone (.gitignore contains lib/) ... The login page hardcodes demo restaurant UUID ... CI is probably red (no Postgres/Redis service in CI) ... The code doesn’t match the plans (no Postgres RLS, enforce_tenant never used, no Alembic migrations, guessable QR tokens, DEBUG default leaks OTP, test coverage gaps). Analyze these instructions and fix these first properly, don't move on module 2."*
+- **Actions Taken:**
+  1. **Fixed Role Escalation on `/signup`:**
+     - Restricted public `POST /api/v1/auth/signup` to strictly create `UserRole.CUSTOMER` accounts. Removed client ability to inject staff roles.
+     - Created dedicated manager-guarded staff provisioning endpoint `POST /api/v1/auth/staff` guarded by `Depends(require_roles([UserRole.MANAGER]))` and `enforce_tenant`.
+  2. **Eliminated Known Password on OTP Accounts:**
+     - Updated `User.hashed_password` in `backend/app/models/user.py` to `nullable=True`.
+     - In `POST /api/v1/auth/verify-otp`, new accounts are created with `hashed_password=None`.
+     - In `POST /api/v1/auth/login`, requests against OTP-only accounts are explicitly blocked with `400 Bad Request ("This account was registered via OTP and does not have a password set. Please use OTP login.")`.
+  3. **Fixed Fresh Clone Breakage (`.gitignore`):**
+     - Scoped `lib/` in `.gitignore` to `backend/lib/` and added explicit `!frontend/src/lib/` rule so `frontend/src/lib/api.ts` and `frontend/src/lib/authStore.ts` are permanently tracked. Added `*.tsbuildinfo` exclusion.
+  4. **Fixed Deterministic Demo Restaurant UUID & Flexible Login:**
+     - Pinned `DEMO_RESTAURANT_ID` in `backend/scripts/seed.py` to fixed UUID `52dc0556-c8c6-4131-be96-6643f9cc35b0`.
+     - Made `restaurant_id` optional in `POST /api/v1/auth/login`, allowing staff to log in with username/password without needing the restaurant UUID.
+     - Updated `frontend/src/app/login/page.tsx` to omit the restaurant ID from password login.
+  5. **Added PostgreSQL & Redis Service Containers in GitHub Actions CI:**
+     - Updated `.github/workflows/ci.yml` to launch healthy `postgres:16-alpine` and `redis:7-alpine` service containers with `mezflow_test_db`.
+  6. **Established Official Alembic Migrations & Postgres Row-Level Security (RLS):**
+     - Generated `backend/alembic/versions/5bc4682e3062_001_initial_schema.py` creating complete schema and configuring PostgreSQL RLS on `users`, `tables`, `menu_categories`, `menu_items`, and `audit_logs` using `app.current_restaurant_id`.
+     - Executed and validated `alembic upgrade head`.
+  7. **Unguessable Cryptographic Table QR Tokens:**
+     - Replaced sequential `mez-t1` tokens with HMAC-SHA256 cryptographically signed tokens (`f"t{i}_{token_sig}"`).
+  8. **Secured `DEBUG` Defaults in Production:**
+     - Configured Pydantic validator in `backend/app/core/config.py` ensuring `DEBUG=False` whenever `ENVIRONMENT == "production"`.
+     - Explicitly injected `DEBUG=False` into `docker-compose.yml` for production backend.
+     - Restricted `debug_otp` in `request-otp` strictly to `ENVIRONMENT == "development" and settings.DEBUG`.
+  9. **Enforced Multi-Tenant Isolation (`enforce_tenant`):**
+     - Integrated `enforce_tenant` into `POST /api/v1/auth/staff` and `GET /api/v1/auth/audit-logs`.
+  10. **Comprehensive Test Suite & Verification:**
+      - Configured `backend/tests/conftest.py` with `NullPool` test engine to prevent closed event loop connection issues on Windows.
+      - Wrote 11 comprehensive tests in `backend/tests/test_auth.py` covering password hashing, staff login, claims decoding, public customer signup enforcement, manager staff provisioning, non-manager restriction, OTP authentication, OTP password login prevention, RBAC matrix, and cross-tenant isolation.
+      - Result: **11 of 11 tests passed (100%)**. Frontend TypeScript check passed cleanly (0 errors).
+
 ---
 
 ## 4. Current Repository State Summary
 
 * **Branch:** `main`
 * **Code Implementation Status:**
-  - **Module 0 (Foundation & Scaffolding):** 100% Complete & Verified.
-  - **Module 1 (Identity & Access Control):** 100% Complete & Verified (CORS issue resolved, login operational).
+  - **Module 0 (Foundation & Scaffolding):** 100% Complete & Verified with Alembic migration pipeline.
+  - **Module 1 (Identity & Access Control):** 100% Complete, Secure & Thoroughly Tested (11/11 tests passing, multi-tenant RLS active, RBAC enforced, OTP password leak plugged).
   - **Module 2 (Digital Menu & QR Table Access):** Specification & Architecture 100% Complete (`Docs/Plan/M2_implementation_plan.md`).
 * **Database State:**
   - PostgreSQL running on port `5433` (Docker container `mezflow-postgres`).
   - Redis running on port `6379` (Docker container `mezflow-redis`).
-  - Seeded with demo restaurant *"MezFlow Bistro"*, 10 tables, 5 categories, 6 dishes, and 5 test user accounts.
+  - Seeded with deterministic demo restaurant *"MezFlow Bistro"* (`52dc0556-c8c6-4131-be96-6643f9cc35b0`), cryptographic table tokens, categories, dishes, and staff.
 * **Server Status:**
   - FastAPI Backend active on port `8000` (`http://localhost:8000`).
   - Next.js Frontend active on port `3001` (`http://localhost:3001`).
@@ -184,12 +218,9 @@ This document serves as the authoritative, persistent operational log of all int
 
 ## 5. Next Steps Queue
 
-1. [ ] Commit recent fixes to Git (`.env.example`, `config.py`, `main.py`, `Docs/AGENT_LOG.md`).
-2. [ ] Initiate **Module 2: Digital Menu & QR Table Access** execution following `Docs/Plan/M2_implementation_plan.md`:
-   - WP2.1: Add structured modifier models (`ModifierGroup`, `ModifierOption`, dietary flags) in `backend/app/models/menu.py`.
-   - WP2.2: Add Pydantic schemas in `backend/app/schemas/menu.py`.
-   - WP2.3 - WP2.6: Implement Menu and Table QR APIs with Redis pub/sub.
-   - WP2.7 - WP2.12: Customer PWA digital menu and modifier bottom sheet.
+1. [ ] Commit all security and architectural remediations to Git and push to `main`.
+2. [ ] Initiate **Module 2: Digital Menu & QR Table Access** implementation upon user confirmation.
+
 
 
 

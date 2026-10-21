@@ -60,9 +60,7 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      // Find restaurant ID by first fetching restaurants or using seeded ID
       const res = await apiClient.post("/auth/login", {
-        restaurant_id: DEMO_RESTAURANT_ID,
         username: email.trim(),
         password: password,
       });

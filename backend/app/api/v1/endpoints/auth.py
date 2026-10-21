@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, desc
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import get_db, get_current_user, require_roles
+from app.api.deps import get_db, get_current_user, require_roles, enforce_tenant
 from app.core.config import settings
 from app.core.security import get_password_hash, verify_password, create_access_token
 from app.models.user import User, UserProfile, UserRole
@@ -14,6 +14,7 @@ from app.models.audit import AuditLog
 from app.models.restaurant import Restaurant
 from app.schemas.auth import (
     UserSignupRequest,
+    StaffCreateRequest,
     UserLoginPasswordRequest,
     OTPRequest,
     OTPVerifyLoginRequest,
@@ -83,13 +84,13 @@ async def signup(
         )
     hashed_pwd = get_password_hash(data.password)
 
-    # 4. Create User & Profile
+    # 4. Create User & Profile (Always force Customer role for public signup)
     new_user = User(
         restaurant_id=data.restaurant_id,
         email=data.email,
         phone_number=data.phone_number,
         hashed_password=hashed_pwd,
-        role=data.role or UserRole.CUSTOMER,
+        role=UserRole.CUSTOMER,
         is_active=True,
         is_verified=False,
     )
@@ -139,6 +140,85 @@ async def signup(
     )
 
 
+@router.post("/staff", response_model=UserResponse, status_code=status.HTTP_201_CREATED, tags=["Administration"])
+async def create_staff(
+    data: StaffCreateRequest,
+    request: Request,
+    current_user: User = Depends(require_roles([UserRole.MANAGER])),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Provisions a staff user (Manager, Kitchen, Service, Cashier) within the manager's tenant restaurant.
+    Guarded strictly by Manager RBAC and tenant enforcement.
+    (FR-M1-03, FR-M1-05, FR-M1-07, NFR-08)
+    """
+    # Cross-tenant guard
+    enforce_tenant(data.restaurant_id, current_user)
+
+    if data.role == UserRole.CUSTOMER:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Customer accounts cannot be created via the staff provisioning endpoint.",
+        )
+
+    # Check for existing user in this restaurant
+    stmt = select(User).where(
+        User.restaurant_id == data.restaurant_id,
+        or_(
+            User.email == data.email,
+            User.phone_number == data.phone_number if data.phone_number else False,
+        ),
+    )
+    existing = await db.execute(stmt)
+    if existing.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A user with this email or phone number already exists in this restaurant.",
+        )
+
+    hashed_pwd = get_password_hash(data.password)
+    staff_user = User(
+        restaurant_id=data.restaurant_id,
+        email=data.email,
+        phone_number=data.phone_number,
+        hashed_password=hashed_pwd,
+        role=data.role,
+        is_active=True,
+        is_verified=True,
+    )
+    db.add(staff_user)
+    await db.flush()
+
+    profile = UserProfile(
+        user_id=staff_user.id,
+        display_name=data.display_name,
+        preferred_language=data.preferred_language,
+        push_notifications_enabled=True,
+    )
+    db.add(profile)
+    await db.flush()
+
+    ip = _get_client_ip(request)
+    await record_audit_log(
+        db=db,
+        restaurant_id=data.restaurant_id,
+        user_id=current_user.id,
+        action="STAFF_USER_CREATED",
+        resource_type="user",
+        resource_id=str(staff_user.id),
+        details={"role": staff_user.role.value, "email": data.email, "display_name": data.display_name},
+        ip_address=ip,
+    )
+    await db.commit()
+    stmt = (
+        select(User)
+        .options(selectinload(User.profile))
+        .where(User.id == staff_user.id)
+    )
+    res = await db.execute(stmt)
+    return res.scalar_one()
+
+
 @router.post("/login", response_model=TokenResponse, tags=["Authentication"])
 async def login(
     data: UserLoginPasswordRequest,
@@ -147,24 +227,58 @@ async def login(
 ):
     """
     Authenticates a user using email/phone and password.
+    Supports global staff login (auto-resolving restaurant) or scoped restaurant login.
     (FR-M1-01, FR-M1-02, FR-M1-05)
     """
     clean_username = data.username.strip()
-    stmt = (
-        select(User)
-        .options(selectinload(User.profile))
-        .where(
-            User.restaurant_id == data.restaurant_id,
-            or_(
-                User.email == clean_username,
-                User.phone_number == clean_username,
-            ),
-        )
-    )
-    res = await db.execute(stmt)
-    user = res.scalar_one_or_none()
 
-    if not user or not verify_password(data.password, user.hashed_password):
+    if data.restaurant_id:
+        stmt = (
+            select(User)
+            .options(selectinload(User.profile))
+            .where(
+                User.restaurant_id == data.restaurant_id,
+                or_(
+                    User.email == clean_username,
+                    User.phone_number == clean_username,
+                ),
+            )
+        )
+        res = await db.execute(stmt)
+        user = res.scalar_one_or_none()
+    else:
+        stmt = (
+            select(User)
+            .options(selectinload(User.profile))
+            .where(
+                or_(
+                    User.email == clean_username,
+                    User.phone_number == clean_username,
+                ),
+            )
+        )
+        res = await db.execute(stmt)
+        users = res.scalars().all()
+        if len(users) > 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Multiple restaurant accounts match this username. Please specify restaurant_id.",
+            )
+        user = users[0] if users else None
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials.",
+        )
+
+    if not user.hashed_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This account was registered via OTP and does not have a password set. Please use OTP login.",
+        )
+
+    if not verify_password(data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials.",
@@ -220,8 +334,8 @@ async def request_otp(data: OTPRequest):
     return {
         "message": "One-time password dispatched successfully.",
         "destination": clean_destination,
-        # For development / testing convenience, include code in debug mode
-        "debug_otp": code if settings.DEBUG else None,
+        # For development / testing convenience, include code ONLY in local development with DEBUG enabled
+        "debug_otp": code if (settings.ENVIRONMENT == "development" and settings.DEBUG) else None,
     }
 
 
@@ -261,12 +375,12 @@ async def verify_otp(
     user = res.scalar_one_or_none()
 
     if not user:
-        # Create user verified by OTP
+        # Create user verified by OTP with NO usable password
         user = User(
             restaurant_id=data.restaurant_id,
             email=clean_dest if is_email else None,
             phone_number=clean_dest if not is_email else None,
-            hashed_password=get_password_hash("otp-auto-gen-password"),
+            hashed_password=None,  # OTP accounts have no usable password; must authenticate via OTP
             role=UserRole.CUSTOMER,
             is_active=True,
             is_verified=True,
@@ -299,22 +413,31 @@ async def verify_otp(
     )
     await db.commit()
 
+    # Eagerly load user with profile
+    stmt = (
+        select(User)
+        .options(selectinload(User.profile))
+        .where(User.id == user.id)
+    )
+    res = await db.execute(stmt)
+    user_loaded = res.scalar_one()
+
     token = create_access_token(
-        subject=str(user.id),
+        subject=str(user_loaded.id),
         claims={
-            "role": user.role.value,
-            "restaurant_id": str(user.restaurant_id),
+            "role": user_loaded.role.value,
+            "restaurant_id": str(user_loaded.restaurant_id),
         },
     )
 
     return TokenResponse(
         access_token=token,
         token_type="bearer",
-        role=user.role.value,
-        restaurant_id=user.restaurant_id,
-        user_id=user.id,
-        display_name=user.profile.display_name if user.profile else None,
-        preferred_language=user.profile.preferred_language if user.profile else "en",
+        role=user_loaded.role.value,
+        restaurant_id=user_loaded.restaurant_id,
+        user_id=user_loaded.id,
+        display_name=user_loaded.profile.display_name if user_loaded.profile else None,
+        preferred_language=user_loaded.profile.preferred_language if user_loaded.profile else "en",
     )
 
 
@@ -399,6 +522,7 @@ async def update_profile(
 
 @router.get("/audit-logs", response_model=List[AuditLogResponse], tags=["Administration"])
 async def list_audit_logs(
+    restaurant_id: Optional[UUID] = None,
     limit: int = 50,
     offset: int = 0,
     current_user: User = Depends(require_roles([UserRole.MANAGER])),
@@ -406,11 +530,16 @@ async def list_audit_logs(
 ):
     """
     Lists immutable audit log entries for the tenant restaurant.
-    Restricted to Manager role only. (FR-M1-06, FR-M1-07, NFR-10)
+    Restricted to Manager role only. Enforces multi-tenant data isolation.
+    (FR-M1-06, FR-M1-07, NFR-08, NFR-10)
     """
+    if restaurant_id is not None:
+        enforce_tenant(restaurant_id, current_user)
+
+    target_restaurant_id = restaurant_id or current_user.restaurant_id
     stmt = (
         select(AuditLog)
-        .where(AuditLog.restaurant_id == current_user.restaurant_id)
+        .where(AuditLog.restaurant_id == target_restaurant_id)
         .order_by(desc(AuditLog.created_at))
         .offset(offset)
         .limit(min(limit, 100))

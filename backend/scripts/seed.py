@@ -29,6 +29,9 @@ def get_password_hash(password: str) -> str:
 
 
 
+DEMO_RESTAURANT_ID = uuid.UUID("52dc0556-c8c6-4131-be96-6643f9cc35b0")
+
+
 async def run_seed():
     print(f"Connecting to database: {settings.DATABASE_URL} ...")
     engine = create_async_engine(settings.DATABASE_URL, echo=False)
@@ -40,13 +43,14 @@ async def run_seed():
     session_maker = async_sessionmaker(engine, expire_on_commit=False)
 
     async with session_maker() as session:
-        # 1. Create or get Demo Restaurant
+        # 1. Create or get Demo Restaurant with fixed deterministic UUID
         query = select(Restaurant).where(Restaurant.slug == "demo-bistro")
         result = await session.execute(query)
         restaurant = result.scalar_one_or_none()
 
         if not restaurant:
             restaurant = Restaurant(
+                id=DEMO_RESTAURANT_ID,
                 name="MezFlow Bistro",
                 slug="demo-bistro",
                 address="F-7 Markaz, Islamabad, Pakistan",
@@ -60,12 +64,21 @@ async def run_seed():
         else:
             print(f"[OK] Found existing Demo Restaurant: {restaurant.name}")
 
-        # 2. Seed Tables 1 through 10
+        # 2. Seed Tables 1 through 10 with cryptographically signed tokens (HMAC-SHA256)
+        import hmac, hashlib
         for i in range(1, 11):
-            token = f"mez-t{i}"
+            # Generate unguessable HMAC token signed with server SECRET_KEY
+            token_sig = hmac.new(
+                settings.SECRET_KEY.encode(),
+                f"table-{restaurant.id}-{i}".encode(),
+                hashlib.sha256
+            ).hexdigest()[:16]
+            token = f"t{i}_{token_sig}"
+
             tbl_query = select(Table).where(Table.restaurant_id == restaurant.id, Table.table_number == i)
             tbl_res = await session.execute(tbl_query)
-            if not tbl_res.scalar_one_or_none():
+            tbl_existing = tbl_res.scalar_one_or_none()
+            if not tbl_existing:
                 table = Table(
                     restaurant_id=restaurant.id,
                     table_number=i,
@@ -75,7 +88,11 @@ async def run_seed():
                     status=TableStatus.AVAILABLE,
                 )
                 session.add(table)
-        print("[OK] Tables 1 through 10 initialized.")
+            else:
+                # Update to cryptographic token if old sequential token was used
+                if tbl_existing.qr_code_token.startswith("mez-t"):
+                    tbl_existing.qr_code_token = token
+        print("[OK] Tables 1 through 10 initialized with cryptographic QR tokens.")
 
         # 3. Seed Menu Categories
         categories_data = [
