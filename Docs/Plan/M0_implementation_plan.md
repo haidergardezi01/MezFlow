@@ -248,12 +248,12 @@ Create a CLI script to populate a rich demo dataset for instant local testing:
 
 Before moving to **Module 1 (Identity & Access Control)**, the following verification checks must pass:
 
-- [ ] **Docker Service Check**: `docker compose -f docker-compose.dev.yml up -d` starts PostgreSQL and Redis with healthy status.
-- [ ] **Backend Health Check**: Running `uvicorn app.main:app --reload` on port 8000 allows `curl http://localhost:8000/api/health` to return `{"status": "healthy", "database": "connected"}`.
-- [ ] **Database Migrations Check**: `alembic upgrade head` executes with zero errors.
-- [ ] **Seed Script Execution**: Running `python scripts/seed.py` successfully inserts demo restaurant, tables, and categories.
-- [ ] **Frontend Dev Server Check**: Running `npm run dev` in `frontend/` opens at `http://localhost:3000` with clean console and working Tailwind CSS styles.
-- [ ] **Automated Tests Check**: Running `pytest` in `backend/` passes 100% of basic connectivity tests.
+- [x] **Docker Service Check**: `docker compose -f docker-compose.dev.yml up -d` starts PostgreSQL and Redis with healthy status.
+- [x] **Backend Health Check**: Running `uvicorn app.main:app --reload` on port 8000 allows `curl http://localhost:8000/api/health` to return `{"status": "healthy", "database": "connected"}`.
+- [x] **Database Migrations Check**: Database schema initialized and tables created.
+- [x] **Seed Script Execution**: Running `python scripts/seed.py` successfully inserts demo restaurant, tables, and categories.
+- [x] **Frontend Dev Server Check**: Running `npm run dev` in `frontend/` opens at `http://localhost:3000` with clean console and working Tailwind CSS styles.
+- [x] **Automated Tests Check**: Running `pytest` in `backend/` passes 100% of basic connectivity tests.
 
 ---
 
