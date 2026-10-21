@@ -1,0 +1,20 @@
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q"
+asyncio_mode = "auto"
+testpaths = [
+    "tests",
+]
+pythonpath = ["."]
+python_files = [
+    "test_*.py",
+    "*_test.py",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+ignore = ["E501"]
