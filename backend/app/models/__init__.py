@@ -4,6 +4,7 @@ from app.models.restaurant import Restaurant
 from app.models.user import User, UserProfile, UserRole
 from app.models.table import Table, TableStatus
 from app.models.menu import MenuCategory, MenuItem
+from app.models.audit import AuditLog
 
 __all__ = [
     "Base",
@@ -16,4 +17,5 @@ __all__ = [
     "TableStatus",
     "MenuCategory",
     "MenuItem",
+    "AuditLog",
 ]

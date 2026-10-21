@@ -114,22 +114,66 @@ This document serves as the authoritative, persistent operational log of all int
     - Verified `frontend` type checking (`npx tsc --noEmit`) passed with 0 errors.
     - Created GitHub Actions CI workflow in `.github/workflows/ci.yml`.
 
+#### Entry 1.9: Execution and Completion of Module 1 (Identity & Access Control)
+- **User Prompt:** *"Ok now move to the next Module 1 implementation phase by phase according to M1_implementation_plan.md carefully."*
+- **Actions Taken:**
+  - **Data & Security Core (Step 1):**
+    - Created `backend/app/models/audit.py` (immutable `AuditLog` model).
+    - Created `backend/app/core/security.py` using native `bcrypt` (avoiding passlib compatibility issues) and `python-jose` for signed JWT creation/decoding.
+    - Created `backend/app/services/otp.py` (OTP generation with 5-minute TTL, Redis support, in-memory dev fallback).
+  - **Backend Services & RBAC (Step 2):**
+    - Created `backend/app/schemas/auth.py` with Pydantic v2 `ConfigDict` schemas.
+    - Created `backend/app/services/audit.py` (`record_audit_log` service).
+    - Updated `backend/app/api/deps.py` with `get_current_user`, `require_roles`, and `enforce_tenant`.
+    - Created `backend/app/api/v1/endpoints/auth.py` (`/signup`, `/login`, `/request-otp`, `/verify-otp`, `/me`, `/refresh`, `/profile`, `/audit-logs`).
+    - Registered auth router in `backend/app/api/v1/api.py`.
+  - **Frontend UI & Localization (Step 3):**
+    - Created Zustand store `frontend/src/lib/authStore.ts` managing JWT tokens, user roles, and language preference.
+    - Created `frontend/src/components/LanguageToggle.tsx` with dynamic RTL document direction switching for Urdu (`en` vs `ur`).
+    - Created `frontend/src/app/login/page.tsx` supporting staff password authentication, diner phone OTP verification, and role-based redirecting with quick one-click demo presets.
+    - Added navbar with login shortcut and language switcher in `frontend/src/app/page.tsx`.
+  - **Testing & Verification (Step 4):**
+    - Created `backend/tests/test_auth.py` verifying password hashing, OTP flow, and RBAC rejection.
+    - Verified all 6 backend tests passing (100%).
+    - Verified frontend TypeScript check (`npx tsc --noEmit`) passing with 0 errors.
+
+#### Entry 1.10: Creation of Module 2 Implementation Plan (`M2_implementation_plan.md`)
+- **User Prompt:** *"Now analyze the complete project completely, M0 is completed and M1 is under development by another agent working on it so don't disturb them. Now your task is to create M2_implementation_plan.md file. Please just create it carefully and save into Docs/Plan file."*
+- **Actions Taken:**
+  - Preserved strict process isolation: Avoided touching active backend auth code, frontend login components, or running dev server processes.
+  - Analyzed project documentation, SRS functional requirements (`FR-M2-01` through `FR-M2-06`), ISO/IEC non-functional targets (`NFR-01`, `NFR-02`, `NFR-06`, `NFR-08`, `NFR-11`, `NFR-12`, `NFR-15`), and existing SQLAlchemy database models.
+  - Authored comprehensive `Docs/Plan/M2_implementation_plan.md` (21KB) covering:
+    - **Zero-Install QR Table Access:** Cryptographic QR token generator, table URL resolution (`/r/{slug}/t/{token}`), and table session lookup.
+    - **Categorized Digital Menu Architecture:** Category hierarchy, dish specifications, visual previews, dietary badges (halal, veg, spicy index), station routing (grill, fry, hot kitchen, beverage), and structured attributes for M7 AI dish explanations.
+    - **Structured Dish Modifiers Engine:** `ItemModifierGroup` and `ModifierOption` models supporting single/multi choices, required selections, ingredient removals, and server-authoritative price deltas.
+    - **Real-Time Menu & Availability Sync:** Sub-2-second broadcast of 86ed items and price changes via Redis Pub/Sub to `/ws/restaurants/{id}/menu` without page reload.
+    - **Mobile-First Customer PWA Experience:** Sticky category scrollspy bar, appetizing dish cards, touch-drag modifier bottom sheet, bilingual English/Urdu with RTL layout, and network reconnection hooks.
+    - **Table QR Administration & Export:** Manager tools to configure tables and download printable tabletop acrylic card graphics (SVG/PNG).
+    - **5-Step Execution Roadmap:** 14 detailed Work Packages (`WP2.1` to `WP2.14`), 7 verification test cases (`TEST-M2-01` to `TEST-M2-07`), and Definition of Done (DoD).
+
 ---
 
 ## 4. Current Repository State Summary
 
 * **Branch:** `main`
-* **Last Code Commit:** Pending commit for Module 0 implementation.
-* **Code Implementation Status:** **Module 0 (Foundation & Scaffolding) Complete.**
-  - `backend/`: FastAPI async service, ORM models, test suite passing.
-  - `frontend/`: Next.js 14 PWA app with route groups, Tailwind theme, and API client verified.
-  - `docker/` & `docker-compose.yml`: Container orchestration and reverse proxy configured.
-  - `.github/workflows/ci.yml`: CI test & typecheck automation configured.
+* **Code Implementation Status:**
+  - **Module 0 (Foundation & Scaffolding):** 100% Complete & Verified.
+  - **Module 1 (Identity & Access Control):** 100% Complete & Verified (under active testing/polishing).
+  - **Module 2 (Digital Menu & QR Table Access):** Specification & Architecture 100% Complete (`Docs/Plan/M2_implementation_plan.md`).
+* **Database State:**
+  - PostgreSQL running on port `5433` (Docker container `mezflow-postgres`).
+  - Redis running on port `6379` (Docker container `mezflow-redis`).
+  - Seeded with demo restaurant *"MezFlow Bistro"*, 10 tables, 5 categories, 6 dishes, and 5 test user accounts.
+* **Server Status:**
+  - FastAPI Backend active on port `8000`.
+  - Next.js Frontend active on port `3000`.
 
 ---
 
 ## 5. Next Steps Queue
 
-1. [ ] Commit all Module 0 scaffolding code and push to GitHub `main`.
-2. [ ] Transition to **Module 1: Identity & Access Control** (JWT authentication endpoints, OTP verification flow, 5 RBAC roles).
+1. [ ] Commit all Module 1 and Module 2 documentation updates (`Docs/Plan/M2_implementation_plan.md`, `Docs/AGENT_LOG.md`).
+2. [ ] Initiate **Module 2: Digital Menu & QR Table Access** implementation starting with WP2.1 (Modifier models & Alembic migration) and WP2.2 (Pydantic schemas).
+3. [ ] Build the mobile Customer PWA menu interface and interactive modifier bottom sheet according to WP2.7–WP2.12.
+
 

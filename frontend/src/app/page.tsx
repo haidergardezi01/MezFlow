@@ -9,16 +9,39 @@ import {
   Layers,
   Clock,
   CheckCircle2,
+  LogIn,
 } from "lucide-react";
+import { LanguageToggle } from "@/components/LanguageToggle";
 
 export default function HomePage() {
   return (
-    <main className="min-h-screen px-4 py-12 md:py-20 flex flex-col items-center justify-center max-w-6xl mx-auto">
-      {/* Top Badge */}
-      <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full glass-panel text-xs font-medium text-brand-400 mb-8 border border-brand-500/20 shadow-lg shadow-brand-500/5">
-        <Sparkles className="w-3.5 h-3.5 text-brand-400" />
-        <span>MezFlow Real-Time Operations Platform</span>
-      </div>
+    <div className="min-h-screen flex flex-col justify-between">
+      {/* Top Header */}
+      <nav className="w-full max-w-6xl mx-auto px-4 py-6 flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <span className="w-8 h-8 rounded-xl bg-brand-500/20 border border-brand-500/30 flex items-center justify-center text-brand-400 font-bold text-sm">
+            M
+          </span>
+          <span className="font-extrabold text-white text-lg tracking-tight">MezFlow</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <LanguageToggle />
+          <Link
+            href="/login"
+            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-brand-500/10 hover:bg-brand-500/20 text-brand-400 font-semibold text-xs border border-brand-500/30 transition-all shadow-sm"
+          >
+            <LogIn className="w-3.5 h-3.5" />
+            <span>Sign In</span>
+          </Link>
+        </div>
+      </nav>
+
+      <main className="px-4 py-8 flex flex-col items-center justify-center max-w-6xl mx-auto my-auto">
+        {/* Top Badge */}
+        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full glass-panel text-xs font-medium text-brand-400 mb-8 border border-brand-500/20 shadow-lg shadow-brand-500/5">
+          <Sparkles className="w-3.5 h-3.5 text-brand-400" />
+          <span>MezFlow Real-Time Operations Platform</span>
+        </div>
 
       {/* Main Title & Subtitle */}
       <div className="text-center max-w-3xl mb-12">
@@ -134,5 +157,6 @@ export default function HomePage() {
         </div>
       </div>
     </main>
+    </div>
   );
 }

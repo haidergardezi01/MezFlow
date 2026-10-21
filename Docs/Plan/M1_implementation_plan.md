@@ -205,9 +205,9 @@ flowchart TD
 ## 5. Definition of Done (DoD) for Module 1
 
 Module 1 is complete when:
-- [ ] Users can sign up, log in with password or OTP, and receive a signed JWT token.
-- [ ] Role restrictions are strictly enforced on backend endpoints with 100% test coverage.
-- [ ] Multi-tenant isolation prevents cross-restaurant data leaks.
-- [ ] Profile updates allow saving language preference (`English` vs `Urdu`).
-- [ ] Audit logs record all privileged user actions in an append-only format.
-- [ ] Frontend login page works cleanly and redirects users based on their role.
+- [x] Users can sign up, log in with password or OTP, and receive a signed JWT token.
+- [x] Role restrictions are strictly enforced on backend endpoints with 100% test coverage.
+- [x] Multi-tenant isolation prevents cross-restaurant data leaks.
+- [x] Profile updates allow saving language preference (`English` vs `Urdu`).
+- [x] Audit logs record all privileged user actions in an append-only format.
+- [x] Frontend login page works cleanly and redirects users based on their role.
