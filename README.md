@@ -28,6 +28,7 @@ Detailed system documentation and engineering plans are maintained under the [`D
 | **[FYP Proposal](./Docs/MezFlow_FYP_Proposal%201.pdf)** | Original project proposal, work plan, and architectural vision. |
 | **[Module 0 Plan](./Docs/Plan/M0_implementation_plan.md)** | Baseline scaffolding, Docker configuration, FastAPI app factory, and Next.js setup. |
 | **[Module 1 Plan](./Docs/Plan/M1_implementation_plan.md)** | Identity & Access Control plan (JWT, OTP login, RBAC across 5 roles, multi-tenant isolation). |
+| **[Agent Activity Log](./Docs/AGENT_LOG.md)** | Persistent log of AI agent sessions, architectural decisions, file changes, and Git commits. |
 
 ---
 
