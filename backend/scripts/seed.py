@@ -21,9 +21,12 @@ from app.models import (
     UserProfile,
     UserRole,
 )
-from passlib.context import CryptContext
+import bcrypt
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def get_password_hash(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8")[:72], bcrypt.gensalt()).decode("utf-8")
+
 
 
 async def run_seed():
@@ -53,9 +56,9 @@ async def run_seed():
             )
             session.add(restaurant)
             await session.flush()
-            print(f"✓ Created Demo Restaurant: {restaurant.name} (ID: {restaurant.id})")
+            print(f"[OK] Created Demo Restaurant: {restaurant.name} (ID: {restaurant.id})")
         else:
-            print(f"✓ Found existing Demo Restaurant: {restaurant.name}")
+            print(f"[OK] Found existing Demo Restaurant: {restaurant.name}")
 
         # 2. Seed Tables 1 through 10
         for i in range(1, 11):
@@ -72,7 +75,7 @@ async def run_seed():
                     status=TableStatus.AVAILABLE,
                 )
                 session.add(table)
-        print("✓ Tables 1 through 10 initialized.")
+        print("[OK] Tables 1 through 10 initialized.")
 
         # 3. Seed Menu Categories
         categories_data = [
@@ -102,7 +105,7 @@ async def run_seed():
                 session.add(cat)
                 await session.flush()
             cat_map[name] = cat.id
-        print("✓ Menu categories initialized.")
+        print("[OK] Menu categories initialized.")
 
         # 4. Seed Menu Items
         dishes = [
@@ -217,7 +220,7 @@ async def run_seed():
                     is_available=True,
                 )
                 session.add(item)
-        print("✓ Menu dishes with structured AI attributes seeded.")
+        print("[OK] Menu dishes with structured AI attributes seeded.")
 
         # 5. Seed Test Users
         test_users = [
@@ -236,7 +239,7 @@ async def run_seed():
                 user = User(
                     restaurant_id=restaurant.id,
                     email=email,
-                    hashed_password=pwd_context.hash(password),
+                    hashed_password=get_password_hash(password),
                     role=role,
                     is_active=True,
                     is_verified=True,
@@ -251,10 +254,10 @@ async def run_seed():
                     push_notifications_enabled=True,
                 )
                 session.add(profile)
-        print("✓ Test user accounts across 5 roles initialized.")
+        print("[OK] Test user accounts across 5 roles initialized.")
 
         await session.commit()
-        print("\n🎉 MezFlow database seeding completed successfully!")
+        print("\n[SUCCESS] MezFlow database seeding completed successfully!")
 
 
 if __name__ == "__main__":

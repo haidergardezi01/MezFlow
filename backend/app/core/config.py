@@ -17,11 +17,11 @@ class Settings(BaseSettings):
 
     # PostgreSQL Database
     POSTGRES_SERVER: str = "localhost"
-    POSTGRES_PORT: int = 5432
+    POSTGRES_PORT: int = 5433
     POSTGRES_USER: str = "postgres"
     POSTGRES_PASSWORD: str = "postgres"
     POSTGRES_DB: str = "mezflow_db"
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/mezflow_db"
+    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5433/mezflow_db"
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -42,7 +42,7 @@ class Settings(BaseSettings):
         return ["http://localhost:3000", "http://127.0.0.1:3000"]
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(".env", "../.env"),
         env_file_encoding="utf-8",
         case_sensitive=True,
         extra="allow",
