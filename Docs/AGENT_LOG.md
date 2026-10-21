@@ -151,6 +151,18 @@ This document serves as the authoritative, persistent operational log of all int
     - **Table QR Administration & Export:** Manager tools to configure tables and download printable tabletop acrylic card graphics (SVG/PNG).
     - **5-Step Execution Roadmap:** 14 detailed Work Packages (`WP2.1` to `WP2.14`), 7 verification test cases (`TEST-M2-01` to `TEST-M2-07`), and Definition of Done (DoD).
 
+#### Entry 1.11: CORS Preflight Resolution for Port 3001 & Frontend Auth Verification
+- **User Prompt:** *"200 OK INFO: 127.0.0.1:57170 - "OPTIONS /api/v1/auth/login HTTP/1.1" 400 Bad Request ... Failed to load resource: net::ERR_FAILED ... Access to XMLHttpRequest at 'http://localhost:8000/api/v1/auth/login' from origin 'http://localhost:3001' has been blocked by CORS policy"*
+- **Root Cause Analysis:**
+  - Next.js development server defaulted to port `3001` due to an existing service occupying port `3000`.
+  - Starlette/FastAPI's `CORSMiddleware` returns `400 Bad Request` ("Disallowed CORS origin") during preflight `OPTIONS` if the client's `Origin` is not explicitly permitted.
+  - While regex allowed localhost origins, the environment variable `BACKEND_CORS_ORIGINS` in `.env` only contained `3000`.
+- **Actions Taken:**
+  - Updated `backend/app/core/config.py` and `backend/app/main.py` with explicit origins (`http://localhost:3000`, `http://127.0.0.1:3000`, `http://localhost:3001`, `http://127.0.0.1:3001`) and regex `^https?://(localhost|127\.0\.0\.1)(:\d+)?$`.
+  - Updated both `.env` and `.env.example` to explicitly include port `3001` in `BACKEND_CORS_ORIGINS`.
+  - Verified preflight `OPTIONS /api/v1/auth/login` returns `200 OK` with valid CORS headers.
+  - Tested `POST /api/v1/auth/login` and `POST /api/v1/auth/request-otp` from origin `http://localhost:3001`, confirming successful JWT issuance and OTP dispatch.
+
 ---
 
 ## 4. Current Repository State Summary
@@ -158,22 +170,26 @@ This document serves as the authoritative, persistent operational log of all int
 * **Branch:** `main`
 * **Code Implementation Status:**
   - **Module 0 (Foundation & Scaffolding):** 100% Complete & Verified.
-  - **Module 1 (Identity & Access Control):** 100% Complete & Verified (under active testing/polishing).
+  - **Module 1 (Identity & Access Control):** 100% Complete & Verified (CORS issue resolved, login operational).
   - **Module 2 (Digital Menu & QR Table Access):** Specification & Architecture 100% Complete (`Docs/Plan/M2_implementation_plan.md`).
 * **Database State:**
   - PostgreSQL running on port `5433` (Docker container `mezflow-postgres`).
   - Redis running on port `6379` (Docker container `mezflow-redis`).
   - Seeded with demo restaurant *"MezFlow Bistro"*, 10 tables, 5 categories, 6 dishes, and 5 test user accounts.
 * **Server Status:**
-  - FastAPI Backend active on port `8000`.
-  - Next.js Frontend active on port `3000`.
+  - FastAPI Backend active on port `8000` (`http://localhost:8000`).
+  - Next.js Frontend active on port `3001` (`http://localhost:3001`).
 
 ---
 
 ## 5. Next Steps Queue
 
-1. [ ] Commit all Module 1 and Module 2 documentation updates (`Docs/Plan/M2_implementation_plan.md`, `Docs/AGENT_LOG.md`).
-2. [ ] Initiate **Module 2: Digital Menu & QR Table Access** implementation starting with WP2.1 (Modifier models & Alembic migration) and WP2.2 (Pydantic schemas).
-3. [ ] Build the mobile Customer PWA menu interface and interactive modifier bottom sheet according to WP2.7–WP2.12.
+1. [ ] Commit recent fixes to Git (`.env.example`, `config.py`, `main.py`, `Docs/AGENT_LOG.md`).
+2. [ ] Initiate **Module 2: Digital Menu & QR Table Access** execution following `Docs/Plan/M2_implementation_plan.md`:
+   - WP2.1: Add structured modifier models (`ModifierGroup`, `ModifierOption`, dietary flags) in `backend/app/models/menu.py`.
+   - WP2.2: Add Pydantic schemas in `backend/app/schemas/menu.py`.
+   - WP2.3 - WP2.6: Implement Menu and Table QR APIs with Redis pub/sub.
+   - WP2.7 - WP2.12: Customer PWA digital menu and modifier bottom sheet.
+
 
 
