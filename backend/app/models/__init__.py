@@ -3,7 +3,7 @@ from app.models.base import BaseModel
 from app.models.restaurant import Restaurant
 from app.models.user import User, UserProfile, UserRole
 from app.models.table import Table, TableStatus
-from app.models.menu import MenuCategory, MenuItem
+from app.models.menu import MenuCategory, MenuItem, ItemModifierGroup, ModifierOption
 from app.models.audit import AuditLog
 
 __all__ = [
@@ -17,5 +17,7 @@ __all__ = [
     "TableStatus",
     "MenuCategory",
     "MenuItem",
+    "ItemModifierGroup",
+    "ModifierOption",
     "AuditLog",
 ]

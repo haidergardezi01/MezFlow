@@ -36,13 +36,13 @@ export default function AdminDashboardPage() {
               <UtensilsCrossed className="w-4 h-4" />
               <span>Menu & Prices</span>
             </a>
-            <a
-              href="#"
+            <Link
+              href="/admin/tables"
               className="flex items-center gap-3 px-3 py-2 rounded-xl text-slate-400 hover:text-white hover:bg-surface-card transition-colors"
             >
               <QrCode className="w-4 h-4" />
               <span>Tables & QR Codes</span>
-            </a>
+            </Link>
             <a
               href="#"
               className="flex items-center gap-3 px-3 py-2 rounded-xl text-slate-400 hover:text-white hover:bg-surface-card transition-colors"

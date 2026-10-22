@@ -225,19 +225,56 @@ This document serves as the authoritative, persistent operational log of all int
      - Result: **14 of 14 tests passing (100%)**.
      - Frontend TypeScript check (`npx tsc --noEmit`): 0 errors.
 
+#### Entry 1.14: Module 2 (Digital Menu & QR Table Access) Full Implementation & Verification
+- **User Prompt:** "Now move to next Module 2 implementation according to plan M2_implementation_plan.md carefully."
+- **Deliverables & Actions Taken:**
+  1. **WP2.1 Data Modeling & Migration:**
+     - Extended `MenuCategory` with `name_ur`, `description_ur`, and `icon_name`.
+     - Extended `MenuItem` with `name_ur`, `description_ur`, `dietary_tags` (JSONB), and `sort_order`.
+     - Created `ItemModifierGroup` and `ModifierOption` models supporting single/multiple selection, min/max selection bounds, default flags, and price deltas.
+     - Generated and applied Alembic migration `7c2e3f4a8b91_002_module2_menu_modifiers.py` (`alembic upgrade head`).
+     - Added `qrcode[pil]>=8.0` to `backend/requirements.txt` and installed into virtual environment.
+     - Enriched `backend/scripts/seed.py` with Urdu translations, dietary tags, icons, and structured modifier groups across demo dishes (Wings, Kebab, Malai Tikka, Shinwari Karahi, Smash Burger, Mint Lemonade).
+  2. **WP2.2 Pydantic Validation Schemas:**
+     - Created `backend/app/schemas/menu.py` with `ModifierOptionBase/Create/Update/Response`, `ModifierGroupBase/Create/Update/Response`, `MenuItemBase/Create/Update/Response/DetailResponse`, `MenuCategoryBase/Create/Update/Response`, `PublicMenuResponse`, `AvailabilityToggleRequest`, and `MenuRealtimeEvent`.
+     - Created `backend/app/schemas/table.py` with `TableBase/Create/Update/Response`, `TableLookupResponse`, and `TableQRGraphicResponse`.
+  3. **WP2.3 & WP2.4 Backend Services:**
+     - Created `backend/app/services/table_service.py` with cryptographic QR token generation (`t{n}_{token_urlsafe(16)}`), public lookup validation, and SVG/PNG QR graphic rendering.
+     - Created `backend/app/services/menu_service.py` with hierarchical single round-trip menu query with `selectinload`, item detail, bilingual autocomplete search, and instant 86 availability toggling.
+  4. **WP2.5 & WP2.6 REST & Real-Time WebSocket Engine:**
+     - Created `backend/app/services/realtime.py` managing `MenuConnectionManager` and Redis Pub/Sub broadcast on `channel:menu:{restaurant_id}`.
+     - Created `backend/app/api/v1/endpoints/tables.py` (lookup, list, create, render printable QR, regenerate token).
+     - Created `backend/app/api/v1/endpoints/menu.py` (public catalog, item details, search, manager category/dish/modifier CRUD, and fast 86 toggle).
+     - Added dual-path WebSocket endpoint (`/ws/restaurants/{restaurant_id}/menu` and `/api/v1/ws/restaurants/{restaurant_id}/menu`) in `backend/app/main.py` with automatic Redis pub/sub forwarding and ping/pong heartbeat.
+     - Registered routers in `backend/app/api/v1/api.py`.
+  5. **WP2.7 - WP2.12 Customer Mobile PWA:**
+     - Created `frontend/src/types/menu.ts` with complete TypeScript interfaces.
+     - Created `frontend/src/hooks/useMenuRealtime.ts` with WebSocket listener, auto-reconnect exponential backoff, and heartbeat ping.
+     - Created `frontend/src/components/customer/DishCard.tsx` with dietary badges, prep time, sold-out overlay, bilingual rendering, and minimum 44px touch targets.
+     - Created `frontend/src/components/customer/ModifierModal.tsx` bottom-sheet with radio buttons for single-choice, checkboxes for add-ons, price delta calculations, instructions box, and bounds validation (`min_selections <= count <= max_selections`).
+     - Updated dynamic customer table route `frontend/src/app/(customer)/r/[restaurantId]/t/[tableId]/page.tsx` with QR token verification, sticky category scrollspy bar, live 86ing sync, search, and English/Urdu RTL layout switch.
+  6. **WP2.13 Manager Tables & QR Stand Management:**
+     - Created `frontend/src/app/(admin)/admin/tables/page.tsx` with live status indicators, add table modal, token regeneration, and printable acrylic stand card viewer with SVG download and print support.
+     - Updated admin sidebar navigation in `frontend/src/app/(admin)/admin/page.tsx`.
+  7. **WP2.14 Verification & Testing:**
+     - Created automated test suite `backend/tests/test_menu.py` covering all 8 acceptance tests (`TEST-M2-01` through `TEST-M2-08`).
+     - Ran full test suite: **22 of 22 tests passing (100%)** with 0 warnings.
+     - Ran frontend TypeScript verification: `npx tsc --noEmit` exited cleanly with **0 errors**.
+
 ---
 
 ## 4. Current Repository State Summary
 
 * **Branch:** `main`
 * **Code Implementation Status:**
-  - **Module 0 (Foundation & Scaffolding):** 100% Complete & Verified (Alembic migration pipeline integrated into CI).
-  - **Module 1 (Identity & Access Control):** Complete, Hardened & Verified (14/14 tests passing, application-level tenant isolation enforced via `enforce_tenant`, brute-force protected OTP, staff-only password authentication).
-  - **Module 2 (Digital Menu & QR Table Access):** Specification & Architecture 100% Complete (`Docs/Plan/M2_implementation_plan.md`).
+  - **Module 0 (Foundation & Scaffolding):** 100% Complete & Verified (Docker, FastAPI, Next.js, Alembic migrations).
+  - **Module 1 (Identity & Access Control):** 100% Complete & Verified (Staff JWT, Customer OTP with 5-attempt brute-force protection, RBAC, tenant isolation).
+  - **Module 2 (Digital Menu & QR Table Access):** 100% Complete & Verified (Bilingual menu, cryptographic table QR tokens, structured modifiers, instant 86ing broadcast over Redis/WebSocket, customer mobile PWA, manager QR acrylic stand generator).
 * **Database State:**
   - PostgreSQL running on port `5433` (Docker container `mezflow-postgres`).
   - Redis running on port `6379` (Docker container `mezflow-redis`).
-  - Seeded with deterministic demo restaurant *"MezFlow Bistro"* (`52dc0556-c8c6-4131-be96-6643f9cc35b0`), unguessable `secrets` table tokens, categories, dishes, and staff.
+  - Applied migrations: `5bc4682e3062` (001_initial_schema), `7c2e3f4a8b91` (002_module2_menu_modifiers).
+  - Seeded demo restaurant *"MezFlow Bistro"* (`52dc0556-c8c6-4131-be96-6643f9cc35b0`), 10 tables with cryptographic QR tokens, bilingual categories, dishes with structured AI attributes, modifier groups, and test staff accounts.
 * **Server Status:**
   - FastAPI Backend active on port `8000` (`http://localhost:8000`).
   - Next.js Frontend active on port `3001` (`http://localhost:3001`).
@@ -246,8 +283,8 @@ This document serves as the authoritative, persistent operational log of all int
 
 ## 5. Next Steps Queue
 
-1. [ ] Commit all hardening updates to Git and push to `main`.
-2. [ ] Initiate **Module 2: Digital Menu & QR Table Access** implementation upon user confirmation.
+1. [ ] Stage and commit Module 2 deliverables to Git and push to `main`.
+2. [ ] Proceed to **Module 3: Collaborative Table Ordering & Real-Time Cart** according to `Docs/Plan/M3_implementation_plan.md`.
 
 
 
