@@ -372,6 +372,21 @@ This document serves as the authoritative, persistent operational log of all int
   - Created automated regression test file `backend/tests/test_tables.py` testing table listing, QR generation with dynamic origins, and cross-tenant isolation.
   - Ran full test suite: **40 of 40 tests passing (100%)**.
 
+
+#### Entry 1.16: Resolving SharedCartDrawer Hook Order & Purging Test Orders for Clean KDS
+- **User Prompt:** *"fIX THIS ISSUE IN MEU CART, One more thing, remove these all demo data like show in kds, make it real data like when I orderd from mobile its show on real time."* (Included screenshot of `Rendered more hooks than during the previous render` in `SharedCartDrawer.tsx:56`).
+- **Root Cause Analysis:**
+  - **Cart Hook Error:** `SharedCartDrawer.tsx` had an early return `if (!isOpen) return null;` placed before `useMemo(() => groupedByDiner, [items])`. Violating the React Rules of Hooks caused an exception when toggling the drawer open/closed.
+  - **Demo Orders in KDS:** During backend automated test runs, test suites (`test_kds.py`, `test_collaborative_cart.py`) generated test orders that persisted in the development database. As a result, the KDS showed 64 old test orders instead of starting clean.
+- **Actions Taken:**
+  - **Fixed React Hooks in `SharedCartDrawer.tsx`:** Moved `if (!isOpen) return null;` after all `useMemo` hooks so hook execution order is unconditional and stable across all renders.
+  - **Purged Test Orders & Carts:** Cleaned all past test orders, order items, modifier selections, diner sessions, and test cart items from the PostgreSQL database and flushed Redis session keys. Tables reset to `AVAILABLE`.
+  - **Added Automated Teardown in `backend/tests/conftest.py`:** Added an autouse session fixture `cleanup_test_orders_teardown` to automatically remove test orders after any future pytest runs, keeping the KDS queue clean for live mobile interaction.
+  - **Verification:**
+    - `npx tsc --noEmit`: 0 TypeScript errors.
+    - Full pytest suite: 40/40 tests passing (100%).
+    - DB order count confirmed at 0. KDS queue is clean and ready for real-time mobile orders.
+
 ---
 
 ## 4. Current Repository State Summary
@@ -389,6 +404,7 @@ This document serves as the authoritative, persistent operational log of all int
   - Redis running on port `6379` (Docker container `mezflow-redis`).
   - Applied migrations: `5bc4682e3062` (001_initial_schema), `7c2e3f4a8b91` (002_module2_menu_modifiers), `a83b4c91d20e` (003_module3_collaborative_ordering), `b94c5e6f7a81` (004_module4_kds_timestamps).
   - Seeded demo restaurant *"MezFlow Bistro"* (`52dc0556-c8c6-4131-be96-6643f9cc35b0`), 10 tables with cryptographic QR tokens, bilingual categories, dishes with structured AI attributes, modifier groups, and test staff accounts.
+  - Active Orders & Carts: Clean (0 old orders, ready for real mobile order dispatch).
 * **Server Status:**
   - FastAPI Backend active on port `8000` (`http://0.0.0.0:8000`).
   - Next.js Frontend active on port `3001` (`http://0.0.0.0:3001`).
@@ -400,6 +416,7 @@ This document serves as the authoritative, persistent operational log of all int
 
 1. [x] Complete Module 0, Module 1, Module 2, Module 3, and Module 4 implementation and verification.
 2. [x] Fix table QR code generation endpoint and verify on local Wi-Fi LAN for real mobile device testing.
-3. [ ] Initiate planning for **Module 5: Order Lifecycle & Real-Time Sync** (FYP-II milestone or edge reconnection & reconciliation).
+3. [x] Fix React hook order in SharedCartDrawer and purge test orders from database.
+4. [ ] Initiate planning for **Module 5: Order Lifecycle & Real-Time Sync** (FYP-II milestone or edge reconnection & reconciliation).
 
 

@@ -125,3 +125,22 @@ async def client():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
+
+
+@pytest_asyncio.fixture(scope="session", autouse=True)
+async def cleanup_test_orders_teardown():
+    """Cleans up test orders and temporary carts after the test session finishes."""
+    yield
+    async with TestSessionLocal() as session:
+        from app.models.order import Order, OrderItem, OrderItemModifier, OrderStatusHistory
+        from app.models.session import TableSession, Diner, CartItem, CartItemModifier
+        from sqlalchemy import delete
+        await session.execute(delete(OrderStatusHistory))
+        await session.execute(delete(OrderItemModifier))
+        await session.execute(delete(OrderItem))
+        await session.execute(delete(Order))
+        await session.execute(delete(CartItemModifier))
+        await session.execute(delete(CartItem))
+        await session.execute(delete(Diner))
+        await session.execute(delete(TableSession))
+        await session.commit()

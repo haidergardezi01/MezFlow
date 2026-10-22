@@ -47,8 +47,6 @@ export function SharedCartDrawer({
   const [updatingItemId, setUpdatingItemId] = useState<string | null>(null);
   const [isClearing, setIsClearing] = useState(false);
 
-  if (!isOpen) return null;
-
   const items = cart?.items || [];
   const currency = cart?.currency || "PKR";
 
@@ -81,6 +79,8 @@ export function SharedCartDrawer({
 
     return Object.values(groups);
   }, [items]);
+
+  if (!isOpen) return null;
 
   const handleQtyChange = async (itemId: string, newQty: number) => {
     try {
