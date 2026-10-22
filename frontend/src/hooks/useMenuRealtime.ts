@@ -28,8 +28,8 @@ export function useMenuRealtime(
 
     // Build WS URL
     const isHttps = window.location.protocol === "https:";
-    const defaultHost = window.location.hostname === "localhost" ? "localhost:8000" : window.location.host;
-    const wsBase = process.env.NEXT_PUBLIC_WS_URL || `${isHttps ? "wss" : "ws"}://${defaultHost}`;
+    const defaultHost = `${window.location.hostname}:8000`;
+    const wsBase = `${isHttps ? "wss" : "ws"}://${defaultHost}`;
     const wsUrl = `${wsBase}/ws/restaurants/${restaurantId}/menu`;
 
     try {

@@ -22,11 +22,11 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# Set up CORS (Permissive for local dev ports 3000, 3001, etc.)
+# Set up CORS (Permissive for local dev and mobile Wi-Fi testing)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.BACKEND_CORS_ORIGINS or ["http://localhost:3000", "http://localhost:3001"],
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+    allow_origins=["*"],
+    allow_origin_regex=r"^https?://.*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

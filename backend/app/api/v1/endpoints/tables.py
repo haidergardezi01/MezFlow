@@ -195,12 +195,15 @@ async def get_table_qr_graphic(
             detail="Table not found.",
         )
 
-    table, restaurant = row
-    # Determine base frontend URL from request host or default
-    base_url = f"{request.url.scheme}://{request.url.netloc}"
-    if "8000" in base_url:
-        # Default frontend port in dev
-        base_url = "http://localhost:3000"
+    # Determine base frontend URL from request origin/referer or host
+    origin = request.headers.get("origin") or request.headers.get("referer")
+    if origin:
+        from urllib.parse import urlparse
+        parsed = urlparse(origin)
+        base_url = f"{parsed.scheme}://{parsed.netloc}"
+    else:
+        req_host = request.headers.get("host", "").split(":")[0] or "localhost"
+        base_url = f"http://{req_host}:3001"
 
     return build_table_qr_response(table, restaurant, base_url=base_url)
 

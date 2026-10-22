@@ -12,10 +12,13 @@ export const apiClient: AxiosInstance = axios.create({
   },
 });
 
-// Request interceptor: Inject Bearer token or Diner ID if present
+// Request interceptor: Inject dynamic baseURL, Bearer token, or Diner ID if present
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     if (typeof window !== "undefined") {
+      // Automatically target backend on the same host (supports mobile Wi-Fi testing)
+      config.baseURL = `http://${window.location.hostname}:8000/api/v1`;
+
       const token = localStorage.getItem("mezflow_token");
       if (token && config.headers) {
         config.headers.Authorization = `Bearer ${token}`;
