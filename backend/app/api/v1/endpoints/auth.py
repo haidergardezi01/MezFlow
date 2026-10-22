@@ -350,34 +350,74 @@ async def verify_otp(
     Creates account automatically if it does not yet exist.
     (FR-M1-01, FR-M1-02)
     """
-    is_valid = await OTPService.verify_otp(data.destination, data.code)
+    is_valid, error_msg = await OTPService.verify_otp(data.destination, data.code)
     if not is_valid:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired OTP code.",
+            detail=error_msg or "Invalid or expired OTP code.",
         )
 
     clean_dest = data.destination.strip()
     is_email = "@" in clean_dest
 
-    stmt = (
-        select(User)
-        .options(selectinload(User.profile))
-        .where(
-            User.restaurant_id == data.restaurant_id,
-            or_(
-                User.email == clean_dest,
-                User.phone_number == clean_dest,
-            ),
+    # Resolve target restaurant and existing user
+    if data.restaurant_id:
+        target_restaurant_id = data.restaurant_id
+        stmt = (
+            select(User)
+            .options(selectinload(User.profile))
+            .where(
+                User.restaurant_id == target_restaurant_id,
+                or_(
+                    User.email == clean_dest,
+                    User.phone_number == clean_dest,
+                ),
+            )
         )
-    )
-    res = await db.execute(stmt)
-    user = res.scalar_one_or_none()
+        res = await db.execute(stmt)
+        user = res.scalar_one_or_none()
+    else:
+        stmt = (
+            select(User)
+            .options(selectinload(User.profile))
+            .where(
+                or_(
+                    User.email == clean_dest,
+                    User.phone_number == clean_dest,
+                ),
+            )
+        )
+        res = await db.execute(stmt)
+        users = res.scalars().all()
+        if len(users) > 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Multiple restaurant accounts match this destination. Please specify restaurant_id.",
+            )
+        user = users[0] if users else None
+        if user:
+            target_restaurant_id = user.restaurant_id
+        else:
+            rest_res = await db.execute(select(Restaurant).where(Restaurant.is_active == True).limit(1))
+            default_rest = rest_res.scalar_one_or_none()
+            if not default_rest:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="No active restaurant found. Please provide restaurant_id.",
+                )
+            target_restaurant_id = default_rest.id
+
+    # Security check: OTP is strictly for Customers, not Staff or Managers
+    if user and user.role != UserRole.CUSTOMER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Staff and management accounts cannot authenticate using customer OTP. Please use staff password login.",
+        )
 
     if not user:
         # Create user verified by OTP with NO usable password
         user = User(
-            restaurant_id=data.restaurant_id,
+            restaurant_id=target_restaurant_id,
             email=clean_dest if is_email else None,
             phone_number=clean_dest if not is_email else None,
             hashed_password=None,  # OTP accounts have no usable password; must authenticate via OTP
@@ -403,7 +443,7 @@ async def verify_otp(
     ip = _get_client_ip(request)
     await record_audit_log(
         db=db,
-        restaurant_id=data.restaurant_id,
+        restaurant_id=target_restaurant_id,
         user_id=user.id,
         action="USER_LOGIN_OTP",
         resource_type="session",

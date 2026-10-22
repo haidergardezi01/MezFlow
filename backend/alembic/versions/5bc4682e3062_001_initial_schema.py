@@ -25,7 +25,7 @@ def upgrade() -> None:
     DO $$
     BEGIN
         IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'userrole') THEN
-            CREATE TYPE userrole AS ENUM ('customer', 'kitchen_staff', 'service_staff', 'cashier', 'manager');
+            CREATE TYPE userrole AS ENUM ('CUSTOMER', 'KITCHEN_STAFF', 'SERVICE_STAFF', 'CASHIER', 'MANAGER');
         END IF;
     END
     $$;
@@ -34,7 +34,7 @@ def upgrade() -> None:
     DO $$
     BEGIN
         IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'tablestatus') THEN
-            CREATE TYPE tablestatus AS ENUM ('available', 'occupied', 'awaiting_cleanup');
+            CREATE TYPE tablestatus AS ENUM ('AVAILABLE', 'OCCUPIED', 'AWAITING_CLEANUP');
         END IF;
     END
     $$;
@@ -63,7 +63,7 @@ def upgrade() -> None:
         email VARCHAR(255),
         phone_number VARCHAR(50),
         hashed_password VARCHAR(255),
-        role userrole NOT NULL DEFAULT 'customer',
+        role userrole NOT NULL DEFAULT 'CUSTOMER',
         is_active BOOLEAN NOT NULL DEFAULT TRUE,
         is_verified BOOLEAN NOT NULL DEFAULT FALSE,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -74,6 +74,8 @@ def upgrade() -> None:
     op.execute("CREATE INDEX IF NOT EXISTS ix_users_email ON users(email)")
     op.execute("CREATE INDEX IF NOT EXISTS ix_users_phone_number ON users(phone_number)")
     op.execute("CREATE INDEX IF NOT EXISTS ix_users_role ON users(role)")
+    op.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_users_restaurant_email ON users(restaurant_id, email) WHERE email IS NOT NULL")
+    op.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_users_restaurant_phone ON users(restaurant_id, phone_number) WHERE phone_number IS NOT NULL")
 
     op.execute("""
     CREATE TABLE IF NOT EXISTS user_profiles (
@@ -95,7 +97,7 @@ def upgrade() -> None:
         name VARCHAR(50),
         qr_code_token VARCHAR(100) NOT NULL UNIQUE,
         capacity INTEGER NOT NULL DEFAULT 4,
-        status tablestatus NOT NULL DEFAULT 'available',
+        status tablestatus NOT NULL DEFAULT 'AVAILABLE',
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
@@ -103,6 +105,7 @@ def upgrade() -> None:
     op.execute("CREATE INDEX IF NOT EXISTS ix_tables_restaurant_id ON tables(restaurant_id)")
     op.execute("CREATE INDEX IF NOT EXISTS ix_tables_qr_code_token ON tables(qr_code_token)")
     op.execute("CREATE INDEX IF NOT EXISTS ix_tables_status ON tables(status)")
+    op.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_tables_restaurant_table_number ON tables(restaurant_id, table_number)")
 
     op.execute("""
     CREATE TABLE IF NOT EXISTS menu_categories (

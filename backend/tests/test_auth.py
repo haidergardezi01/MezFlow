@@ -202,3 +202,67 @@ async def test_cross_tenant_isolation_enforce_tenant(client: AsyncClient):
         headers={"Authorization": f"Bearer {mgr_a_token}"},
     )
     assert log_res.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_otp_brute_force_lockout(client: AsyncClient):
+    """TEST-M1-10: Entering 5 invalid OTP codes invalidates the OTP."""
+    phone = f"+92300{uuid.uuid4().int % 10000000:07d}"
+
+    # 1. Request OTP
+    req_res = await client.post("/api/v1/auth/request-otp", json={"destination": phone})
+    assert req_res.status_code == 200
+
+    # 2. Submit wrong code 5 times
+    for _ in range(5):
+        fail_res = await client.post("/api/v1/auth/verify-otp", json={
+            "destination": phone,
+            "code": "000000",
+        })
+        assert fail_res.status_code == 400
+
+    # 3. 6th attempt should state invalidation / expired
+    lockout_res = await client.post("/api/v1/auth/verify-otp", json={
+        "destination": phone,
+        "code": "000000",
+    })
+    assert lockout_res.status_code == 400
+    assert "invalidated" in lockout_res.json()["detail"].lower() or "expired" in lockout_res.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_staff_account_cannot_login_via_otp(client: AsyncClient):
+    """TEST-M1-11: Staff accounts cannot authenticate using customer OTP endpoint."""
+    # Seeded kitchen staff has phone or email
+    # Let's request OTP for kitchen staff email
+    req_res = await client.post("/api/v1/auth/request-otp", json={"destination": "kitchen@mezflow.com"})
+    assert req_res.status_code == 200
+    debug_otp = req_res.json().get("debug_otp")
+
+    if debug_otp:
+        v_res = await client.post("/api/v1/auth/verify-otp", json={
+            "destination": "kitchen@mezflow.com",
+            "code": debug_otp,
+        })
+        # Must be rejected because staff accounts cannot use OTP login
+        assert v_res.status_code == 403
+        assert "staff and management accounts cannot authenticate using customer otp" in v_res.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_duplicate_email_in_same_restaurant_rejected(client: AsyncClient):
+    """TEST-M1-12: Creating two accounts with same email in same restaurant is rejected."""
+    dup_email = f"dup_{uuid.uuid4().hex[:6]}@example.com"
+    payload = {
+        "restaurant_id": str(DEMO_RESTAURANT_A_ID),
+        "display_name": "Original User",
+        "email": dup_email,
+        "password": "password123",
+        "preferred_language": "en",
+    }
+    first_res = await client.post("/api/v1/auth/signup", json=payload)
+    assert first_res.status_code == 201
+
+    second_res = await client.post("/api/v1/auth/signup", json=payload)
+    assert second_res.status_code == 400
+    assert "already exists" in second_res.json()["detail"].lower()

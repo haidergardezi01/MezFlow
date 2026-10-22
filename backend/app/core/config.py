@@ -42,6 +42,16 @@ class Settings(BaseSettings):
             return False
         return v
 
+    @field_validator("SECRET_KEY", mode="after")
+    @classmethod
+    def validate_secret_key(cls, v: str, info) -> str:
+        env = info.data.get("ENVIRONMENT", "development")
+        if env == "production" and ("dev" in v.lower() or "temporary" in v.lower() or len(v) < 32):
+            raise ValueError(
+                "In production, SECRET_KEY must be a secure random key of at least 32 characters."
+            )
+        return v
+
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod
     def assemble_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:

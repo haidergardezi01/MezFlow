@@ -35,7 +35,7 @@ class OTPRequest(BaseModel):
 
 
 class OTPVerifyLoginRequest(BaseModel):
-    restaurant_id: UUID
+    restaurant_id: Optional[UUID] = Field(None, description="Optional restaurant scope (defaults to active tenant)")
     destination: str = Field(..., description="Phone number or email")
     code: str = Field(..., min_length=6, max_length=6, pattern="^[0-9]{6}$")
 

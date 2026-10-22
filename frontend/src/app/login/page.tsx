@@ -129,7 +129,6 @@ export default function LoginPage() {
 
     try {
       const res = await apiClient.post("/auth/verify-otp", {
-        restaurant_id: DEMO_RESTAURANT_ID,
         destination: phone.trim(),
         code: otpCode.trim(),
       });

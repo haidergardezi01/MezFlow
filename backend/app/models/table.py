@@ -1,5 +1,5 @@
 import enum
-from sqlalchemy import Column, String, Integer, ForeignKey, Enum as SQLEnum
+from sqlalchemy import Column, String, Integer, ForeignKey, Enum as SQLEnum, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.models.base import BaseModel
@@ -20,6 +20,10 @@ class Table(BaseModel):
     qr_code_token = Column(String(100), unique=True, nullable=False, index=True)
     capacity = Column(Integer, default=4, nullable=False)
     status = Column(SQLEnum(TableStatus), default=TableStatus.AVAILABLE, nullable=False, index=True)
+
+    __table_args__ = (
+        UniqueConstraint("restaurant_id", "table_number", name="uq_tables_restaurant_table_number"),
+    )
 
     # Relationship
     restaurant = relationship("Restaurant", back_populates="tables")

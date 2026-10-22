@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, ForeignKey, Enum as SQLEnum
+from sqlalchemy import Column, String, Boolean, ForeignKey, Enum as SQLEnum, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 import enum
@@ -23,6 +23,11 @@ class User(BaseModel):
     role = Column(SQLEnum(UserRole), default=UserRole.CUSTOMER, nullable=False, index=True)
     is_active = Column(Boolean, default=True, nullable=False)
     is_verified = Column(Boolean, default=False, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("restaurant_id", "email", name="uq_users_restaurant_email"),
+        UniqueConstraint("restaurant_id", "phone_number", name="uq_users_restaurant_phone"),
+    )
 
     # Relationships
     restaurant = relationship("Restaurant", back_populates="users")

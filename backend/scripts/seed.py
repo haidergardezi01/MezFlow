@@ -64,16 +64,10 @@ async def run_seed():
         else:
             print(f"[OK] Found existing Demo Restaurant: {restaurant.name}")
 
-        # 2. Seed Tables 1 through 10 with cryptographically signed tokens (HMAC-SHA256)
-        import hmac, hashlib
+        # 2. Seed Tables 1 through 10 with cryptographically secure random tokens
+        import secrets
         for i in range(1, 11):
-            # Generate unguessable HMAC token signed with server SECRET_KEY
-            token_sig = hmac.new(
-                settings.SECRET_KEY.encode(),
-                f"table-{restaurant.id}-{i}".encode(),
-                hashlib.sha256
-            ).hexdigest()[:16]
-            token = f"t{i}_{token_sig}"
+            token = f"t{i}_{secrets.token_urlsafe(16)}"
 
             tbl_query = select(Table).where(Table.restaurant_id == restaurant.id, Table.table_number == i)
             tbl_res = await session.execute(tbl_query)

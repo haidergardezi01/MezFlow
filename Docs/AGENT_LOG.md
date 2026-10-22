@@ -197,19 +197,47 @@ This document serves as the authoritative, persistent operational log of all int
       - Wrote 11 comprehensive tests in `backend/tests/test_auth.py` covering password hashing, staff login, claims decoding, public customer signup enforcement, manager staff provisioning, non-manager restriction, OTP authentication, OTP password login prevention, RBAC matrix, and cross-tenant isolation.
       - Result: **11 of 11 tests passed (100%)**. Frontend TypeScript check passed cleanly (0 errors).
 
+#### Entry 1.13: Second-Pass Hardening, Enum Normalization & OTP Brute-Force Remediation
+- **User Review Feedback:**
+  - *PostgreSQL enum labels:* Migration used lowercase labels while SQLAlchemy SQLEnum defaults to uppercase member names, risking insert errors on clean databases.
+  - *RLS accuracy:* Tenant isolation rests on application-level enforcement (`enforce_tenant`, scoped queries) rather than active DB-level session variables; earlier wording overstated "mathematically secure".
+  - *CI migration testing:* CI ran tests without running `alembic upgrade head`. Database lacked unique constraints on `(restaurant_id, email)` and `(restaurant_id, phone)`.
+  - *OTP robustness:* Generation used `random` instead of `secrets`; no failed attempt limiting; staff accounts were not explicitly restricted from OTP login.
+  - *QR tokens & Config:* Tokens used HMAC with public dev secret key; production `SECRET_KEY` lacked validation; login page OTP flow hardcoded restaurant UUID.
+- **Actions Taken:**
+  1. **Enum & Schema Normalization:**
+     - Aligned PostgreSQL migration `5bc4682e3062_001_initial_schema.py` and SQLAlchemy models (`UserRole`, `TableStatus`) on uppercase enum labels (`CUSTOMER`, `KITCHEN_STAFF`, `SERVICE_STAFF`, `CASHIER`, `MANAGER` and `AVAILABLE`, `OCCUPIED`, `AWAITING_CLEANUP`).
+     - Added partial unique constraint indexes in migration: `uq_users_restaurant_email` (`WHERE email IS NOT NULL`), `uq_users_restaurant_phone` (`WHERE phone_number IS NOT NULL`), and `uq_tables_restaurant_table_number` on `tables`.
+     - Added corresponding `UniqueConstraint` tuples to `User` and `Table` models.
+  2. **CI Pipeline Migration Step:**
+     - Added explicit `Run Alembic Migrations` (`alembic upgrade head`) step before `pytest` in `.github/workflows/ci.yml`.
+  3. **Cryptographically Secure OTP Engine:**
+     - Switched OTP generation to `secrets.randbelow(900000) + 100000` in `backend/app/services/otp.py`.
+     - Implemented 5-attempt brute-force protection: invalid codes increment attempts counter; 5 failed attempts trigger permanent code invalidation.
+     - Restricted OTP login strictly to customers; staff and management accounts attempting OTP authentication receive `403 Forbidden` and are directed to staff password login.
+     - Made `restaurant_id` optional in `OTPVerifyLoginRequest` and `/auth/verify-otp`.
+  4. **Security & QR Token Hardening:**
+     - Pinned QR table tokens in `backend/scripts/seed.py` to `secrets.token_urlsafe(16)` format (`t{i}_{token}`).
+     - Added validator in `backend/app/core/config.py` rejecting weak or default `SECRET_KEY` in `production` environments.
+     - Removed hardcoded restaurant UUID from `frontend/src/app/login/page.tsx` for OTP verify flow.
+  5. **Verification & Testing:**
+     - Expanded test suite to **14 tests** in `backend/tests/test_auth.py` and `backend/tests/test_health.py`, adding tests for OTP brute-force lockout, staff OTP rejection, and duplicate email constraint enforcement.
+     - Result: **14 of 14 tests passing (100%)**.
+     - Frontend TypeScript check (`npx tsc --noEmit`): 0 errors.
+
 ---
 
 ## 4. Current Repository State Summary
 
 * **Branch:** `main`
 * **Code Implementation Status:**
-  - **Module 0 (Foundation & Scaffolding):** 100% Complete & Verified with Alembic migration pipeline.
-  - **Module 1 (Identity & Access Control):** 100% Complete, Secure & Thoroughly Tested (11/11 tests passing, multi-tenant RLS active, RBAC enforced, OTP password leak plugged).
+  - **Module 0 (Foundation & Scaffolding):** 100% Complete & Verified (Alembic migration pipeline integrated into CI).
+  - **Module 1 (Identity & Access Control):** Complete, Hardened & Verified (14/14 tests passing, application-level tenant isolation enforced via `enforce_tenant`, brute-force protected OTP, staff-only password authentication).
   - **Module 2 (Digital Menu & QR Table Access):** Specification & Architecture 100% Complete (`Docs/Plan/M2_implementation_plan.md`).
 * **Database State:**
   - PostgreSQL running on port `5433` (Docker container `mezflow-postgres`).
   - Redis running on port `6379` (Docker container `mezflow-redis`).
-  - Seeded with deterministic demo restaurant *"MezFlow Bistro"* (`52dc0556-c8c6-4131-be96-6643f9cc35b0`), cryptographic table tokens, categories, dishes, and staff.
+  - Seeded with deterministic demo restaurant *"MezFlow Bistro"* (`52dc0556-c8c6-4131-be96-6643f9cc35b0`), unguessable `secrets` table tokens, categories, dishes, and staff.
 * **Server Status:**
   - FastAPI Backend active on port `8000` (`http://localhost:8000`).
   - Next.js Frontend active on port `3001` (`http://localhost:3001`).
@@ -218,8 +246,9 @@ This document serves as the authoritative, persistent operational log of all int
 
 ## 5. Next Steps Queue
 
-1. [ ] Commit all security and architectural remediations to Git and push to `main`.
+1. [ ] Commit all hardening updates to Git and push to `main`.
 2. [ ] Initiate **Module 2: Digital Menu & QR Table Access** implementation upon user confirmation.
+
 
 
 
