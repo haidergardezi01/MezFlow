@@ -30,6 +30,27 @@ async def lookup_table_by_token(
     )
     result = await db.execute(query)
     row = result.first()
+
+    # Friendly fallback for development/manual browsing: allow 'table-4', 'table_4', 'table4', or '4'
+    if not row:
+        token_clean = (
+            qr_code_token.lower()
+            .replace("-", "")
+            .replace("_", "")
+            .replace(" ", "")
+        )
+        num_part = (
+            token_clean[5:] if token_clean.startswith("table") else token_clean
+        )
+        if num_part.isdigit():
+            fallback_query = (
+                select(Table, Restaurant)
+                .join(Restaurant, Table.restaurant_id == Restaurant.id)
+                .where(Table.table_number == int(num_part))
+            )
+            fallback_res = await db.execute(fallback_query)
+            row = fallback_res.first()
+
     if not row:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
