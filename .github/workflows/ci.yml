@@ -52,23 +52,47 @@ jobs:
       - name: Run Alembic Migrations
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/mezflow_test_db
+          POSTGRES_SERVER: localhost
           POSTGRES_PORT: 5432
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: mezflow_test_db
           ENVIRONMENT: test
           DEBUG: false
         run: |
           cd backend
           alembic upgrade head
 
-      - name: Run Pytest
+      - name: Seed Test Database
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/mezflow_test_db
+          POSTGRES_SERVER: localhost
           POSTGRES_PORT: 5432
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: mezflow_test_db
           REDIS_URL: redis://localhost:6379/0
           ENVIRONMENT: test
           DEBUG: false
         run: |
           cd backend
-          pytest
+          python scripts/seed.py
+
+      - name: Run Pytest
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/mezflow_test_db
+          POSTGRES_SERVER: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: mezflow_test_db
+          REDIS_URL: redis://localhost:6379/0
+          SECRET_KEY: test-secret-key-12345678901234567890123456789012
+          ENVIRONMENT: test
+          DEBUG: false
+        run: |
+          cd backend
+          pytest -v
 
   frontend-check:
     runs-on: ubuntu-latest

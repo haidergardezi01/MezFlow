@@ -400,6 +400,18 @@ This document serves as the authoritative, persistent operational log of all int
   - Added kitchen auto-authentication in `frontend/src/app/(kds)/kds/page.tsx`: If accessed unauthenticated (such as on a wall-mounted tablet or fresh browser window), the KDS automatically provisions a kitchen session (`kitchen@mezflow.com`) so chef display never fails with 401.
   - Verified TypeScript compilation: `npx tsc --noEmit` exited with 0 errors.
 
+
+#### Entry 1.18: Resolving GitHub Actions CI Test Database Seeding & Pipeline Pass
+- **User Prompt:** *User showed screenshot of GitHub commit list with red 'x' on commit `16f77c5` and asked "Looks what sow in red,why?"*
+- **Root Cause Analysis:**
+  - The GitHub Actions CI pipeline (`.github/workflows/ci.yml`) runs tests on an isolated Ubuntu runner with a fresh Docker PostgreSQL container (`mezflow_test_db`).
+  - While migrations (`alembic upgrade head`) ran successfully, the test database had zero seeded menu categories, items, and modifiers.
+  - When `test_menu.py` and `test_collaborative_cart.py` ran in CI, assertions expecting seeded menu categories (e.g. `assert len(data["categories"]) > 0`) failed with `AssertionError`.
+- **Actions Taken:**
+  - Added baseline test database seeding in `backend/tests/conftest.py`: `setup_test_database()` now calls `run_seed()` to ensure categories, items, modifiers, and tables exist in any test environment.
+  - Updated `.github/workflows/ci.yml`: Added an explicit `Seed Test Database` step and passed complete database environment variables (`POSTGRES_SERVER`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `SECRET_KEY`).
+  - Ran full test suite locally: **40 of 40 tests passing (100%)**.
+
 ---
 
 ## 4. Current Repository State Summary
@@ -431,6 +443,7 @@ This document serves as the authoritative, persistent operational log of all int
 2. [x] Fix table QR code generation endpoint and verify on local Wi-Fi LAN for real mobile device testing.
 3. [x] Fix React hook order in SharedCartDrawer and purge test orders from database.
 4. [x] Resolve port 8000 Docker collision and add KDS direct auto-auth.
-5. [ ] Initiate planning for **Module 5: Order Lifecycle & Real-Time Sync** (FYP-II milestone or edge reconnection & reconciliation).
+5. [x] Fix GitHub Actions CI test database seeding so CI pipeline builds green.
+6. [ ] Initiate planning for **Module 5: Order Lifecycle & Real-Time Sync** (FYP-II milestone or edge reconnection & reconciliation).
 
 

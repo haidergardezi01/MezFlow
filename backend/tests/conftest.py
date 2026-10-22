@@ -42,6 +42,10 @@ async def setup_test_database():
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+    # Seed baseline menu, dishes, modifier groups, and tables
+    from scripts.seed import run_seed
+    await run_seed()
+
     async with TestSessionLocal() as session:
         # 1. Restaurant A
         res_a = await session.execute(select(Restaurant).where(Restaurant.id == DEMO_RESTAURANT_A_ID))
