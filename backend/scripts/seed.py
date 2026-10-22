@@ -546,7 +546,7 @@ async def run_seed():
 
                 profile = UserProfile(
                     user_id=user.id,
-                    full_name=name,
+                    display_name=name,
                     preferred_language="en",
                 )
                 session.add(profile)
