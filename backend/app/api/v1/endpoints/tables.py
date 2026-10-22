@@ -195,6 +195,8 @@ async def get_table_qr_graphic(
             detail="Table not found.",
         )
 
+    table, restaurant = row
+
     # Determine base frontend URL from request origin/referer or host
     origin = request.headers.get("origin") or request.headers.get("referer")
     if origin:

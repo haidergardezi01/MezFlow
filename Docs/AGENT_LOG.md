@@ -359,6 +359,19 @@ This document serves as the authoritative, persistent operational log of all int
      - Full pytest suite: **38 of 38 tests passing (100%)** with zero warnings or failures.
      - Frontend TypeScript compiler check: `npx tsc --noEmit` exited cleanly with **0 errors**.
 
+
+#### Entry 1.15: Resolving Mobile/LAN QR Code Generation "Network Error" & Table Tests
+- **User Prompt:** *User showed screenshot of `http://192.168.18.95:3001/admin/tables` with browser alert "192.168.18.95:3001 says: Network Error" and asked "?"*
+- **Root Cause Analysis:**
+  - When the manager clicked "View & Print" on a table card in the admin UI, frontend called `GET /api/v1/tables/{table_id}/qr`.
+  - In `backend/app/api/v1/endpoints/tables.py`, `row = res.first()` was retrieved, but the tuple unpacking `table, restaurant = row` was missing before calling `build_table_qr_response(table, restaurant, ...)`.
+  - This raised `NameError: name 'table' is not defined` (HTTP 500). FastAPI omitted CORS headers on this unhandled server error, causing Axios on `192.168.18.95:3001` to interpret it as a CORS network blockage and display `Network Error`.
+- **Actions Taken:**
+  - Fixed `backend/app/api/v1/endpoints/tables.py` by properly unpacking `table, restaurant = row`.
+  - Verified `GET /api/v1/tables/{table_id}/qr` on LAN IP `http://192.168.18.95:8000`: returns HTTP 200 with complete SVG graphic, PNG base64 data URL, and dynamic mobile diner URL `http://192.168.18.95:3001/r/demo-bistro/t/{token}`.
+  - Created automated regression test file `backend/tests/test_tables.py` testing table listing, QR generation with dynamic origins, and cross-tenant isolation.
+  - Ran full test suite: **40 of 40 tests passing (100%)**.
+
 ---
 
 ## 4. Current Repository State Summary
@@ -368,7 +381,7 @@ This document serves as the authoritative, persistent operational log of all int
 * **Code Implementation Status:**
   - **Module 0 (Foundation & Scaffolding):** 100% Complete & Verified (Docker, FastAPI, Next.js, Alembic migrations).
   - **Module 1 (Identity & Access Control):** 100% Complete & Verified (Staff JWT, Customer OTP with 5-attempt brute-force protection, RBAC, tenant isolation).
-  - **Module 2 (Digital Menu & QR Table Access):** 100% Complete & Verified (Bilingual menu, cryptographic table QR tokens, structured modifiers, instant 86ing broadcast over Redis/WebSocket, customer mobile PWA, manager QR acrylic stand generator).
+  - **Module 2 (Digital Menu & QR Table Access):** 100% Complete & Verified (Bilingual menu, cryptographic table QR tokens, structured modifiers, instant 86ing broadcast over Redis/WebSocket, customer mobile PWA, manager QR acrylic stand generator with dynamic multi-device LAN IP routing).
   - **Module 3 (Collaborative Table Ordering & Real-Time Cart):** 100% Complete & Verified (Multi-diner shared table sessions, sub-2s cart sync, zero-trust server pricing, atomic double-submission lock, KDS dispatch bridge, live tracking timeline).
   - **Module 4 (Kitchen Display System & Order Processing Pipeline):** 100% Complete & Verified (Zero-install web KDS, station routing, one-tap bump bar, 60s recall, urgency timers, Web Audio chime alerts, audit trail).
 * **Database State:**
@@ -377,13 +390,16 @@ This document serves as the authoritative, persistent operational log of all int
   - Applied migrations: `5bc4682e3062` (001_initial_schema), `7c2e3f4a8b91` (002_module2_menu_modifiers), `a83b4c91d20e` (003_module3_collaborative_ordering), `b94c5e6f7a81` (004_module4_kds_timestamps).
   - Seeded demo restaurant *"MezFlow Bistro"* (`52dc0556-c8c6-4131-be96-6643f9cc35b0`), 10 tables with cryptographic QR tokens, bilingual categories, dishes with structured AI attributes, modifier groups, and test staff accounts.
 * **Server Status:**
-  - FastAPI Backend active on port `8000` (`http://localhost:8000`).
-  - Next.js Frontend active on port `3001` (`http://localhost:3001`).
+  - FastAPI Backend active on port `8000` (`http://0.0.0.0:8000`).
+  - Next.js Frontend active on port `3001` (`http://0.0.0.0:3001`).
+* **Test Suite Status:** 40/40 tests passing (100%).
 
 ---
 
 ## 5. Next Steps Queue
 
 1. [x] Complete Module 0, Module 1, Module 2, Module 3, and Module 4 implementation and verification.
-2. [ ] Initiate planning for **Module 5: Order Lifecycle & Real-Time Sync** (FYP-II milestone or edge reconnection & reconciliation).
+2. [x] Fix table QR code generation endpoint and verify on local Wi-Fi LAN for real mobile device testing.
+3. [ ] Initiate planning for **Module 5: Order Lifecycle & Real-Time Sync** (FYP-II milestone or edge reconnection & reconciliation).
+
 
