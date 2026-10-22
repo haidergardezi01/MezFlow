@@ -387,6 +387,19 @@ This document serves as the authoritative, persistent operational log of all int
     - Full pytest suite: 40/40 tests passing (100%).
     - DB order count confirmed at 0. KDS queue is clean and ready for real-time mobile orders.
 
+
+#### Entry 1.17: Resolving Port 8000 Collision & KDS Direct Auto-Authentication
+- **User Prompt:** *User showed screenshot of KDS screen showing "Network Error" banner with Retry and "RECONNECTING" amber badge, asking "What happen?"*
+- **Root Cause Analysis:**
+  - Netstat and Docker diagnostics revealed that an old unrelated Docker container (`talkse_backend`, PID 14696) had suddenly started/restarted and mapped port `0.0.0.0:8000`, conflicting with MezFlow's native uvicorn process (PID 5540).
+  - This port collision caused inbound HTTP and WebSocket requests to fail or close unexpectedly, throwing `Network Error` on KDS REST fetches and disconnecting the KDS WebSocket (`RECONNECTING`).
+  - Furthermore, if a browser directly visited `/kds` without previously logging in, `apiClient` had no Bearer token, causing `/kds/orders/active` to return 401.
+- **Actions Taken:**
+  - Stopped conflicting Docker containers (`docker stop talkse_backend talkse_ngrok`). Verified port 8000 is now exclusively owned by MezFlow's uvicorn.
+  - Verified backend root endpoint `http://localhost:8000/` and KDS active orders endpoint: HTTP 200 OK.
+  - Added kitchen auto-authentication in `frontend/src/app/(kds)/kds/page.tsx`: If accessed unauthenticated (such as on a wall-mounted tablet or fresh browser window), the KDS automatically provisions a kitchen session (`kitchen@mezflow.com`) so chef display never fails with 401.
+  - Verified TypeScript compilation: `npx tsc --noEmit` exited with 0 errors.
+
 ---
 
 ## 4. Current Repository State Summary
@@ -417,6 +430,7 @@ This document serves as the authoritative, persistent operational log of all int
 1. [x] Complete Module 0, Module 1, Module 2, Module 3, and Module 4 implementation and verification.
 2. [x] Fix table QR code generation endpoint and verify on local Wi-Fi LAN for real mobile device testing.
 3. [x] Fix React hook order in SharedCartDrawer and purge test orders from database.
-4. [ ] Initiate planning for **Module 5: Order Lifecycle & Real-Time Sync** (FYP-II milestone or edge reconnection & reconciliation).
+4. [x] Resolve port 8000 Docker collision and add KDS direct auto-auth.
+5. [ ] Initiate planning for **Module 5: Order Lifecycle & Real-Time Sync** (FYP-II milestone or edge reconnection & reconciliation).
 
 

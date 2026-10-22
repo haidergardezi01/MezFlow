@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
+import apiClient from "@/lib/api";
 import { useAuthStore } from "@/lib/authStore";
 import { useKDSStore } from "@/lib/kdsStore";
 import { useKDSSocket } from "@/hooks/useKDSSocket";
@@ -20,7 +21,7 @@ import {
 } from "lucide-react";
 
 export default function KDSPage() {
-  const { user } = useAuthStore();
+  const { user, setAuth } = useAuthStore();
   const restaurantId = user?.restaurant_id || "52dc0556-c8c6-4131-be96-6643f9cc35b0"; // Fallback to seeded demo restaurant
 
   const {
@@ -43,7 +44,41 @@ export default function KDSPage() {
     updateItemStatus,
   } = useKDSStore();
 
-  const { isConnected } = useKDSSocket(restaurantId);
+  const { isConnected, reconnect } = useKDSSocket(restaurantId);
+
+  // Ensure kitchen authentication for wall-mounted tablet or direct browser access
+  useEffect(() => {
+    async function ensureAuth() {
+      const token = typeof window !== "undefined" ? localStorage.getItem("mezflow_token") : null;
+      if (!token) {
+        try {
+          const res = await apiClient.post("/auth/login", {
+            username: "kitchen@mezflow.com",
+            password: "kitchen123",
+          });
+          const { access_token, user_id, restaurant_id, role, display_name, preferred_language } = res.data;
+          setAuth(access_token, {
+            id: user_id,
+            restaurant_id,
+            role,
+            is_active: true,
+            is_verified: true,
+            profile: {
+              id: user_id,
+              display_name: display_name || "Kitchen Chef",
+              preferred_language: preferred_language || "en",
+              push_notifications_enabled: false,
+            },
+          });
+          fetchActiveOrders();
+          fetchSummary();
+        } catch (e) {
+          console.error("Failed to auto-authenticate kitchen staff:", e);
+        }
+      }
+    }
+    ensureAuth();
+  }, [setAuth, fetchActiveOrders, fetchSummary]);
 
   // Initial fetch & polling fallback (every 30s)
   useEffect(() => {
