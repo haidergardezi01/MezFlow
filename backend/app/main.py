@@ -5,7 +5,11 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.api import api_router
 from app.core.config import settings
-from app.services.realtime import menu_connection_manager, session_connection_manager
+from app.services.realtime import (
+    menu_connection_manager,
+    session_connection_manager,
+    kds_connection_manager,
+)
 
 logger = logging.getLogger("mezflow.app")
 
@@ -198,3 +202,77 @@ async def ws_session_direct(websocket: WebSocket, session_id: str):
 @app.websocket("/api/v1/ws/sessions/{session_id}")
 async def ws_session_apiv1(websocket: WebSocket, session_id: str):
     await _handle_session_ws(websocket, session_id)
+
+
+# =============================================================================
+# KITCHEN DISPLAY SYSTEM (KDS) WEBSOCKET ENDPOINT
+# =============================================================================
+async def _handle_kds_ws(websocket: WebSocket, restaurant_id: str):
+    await kds_connection_manager.connect(restaurant_id, websocket)
+    try:
+        await websocket.send_text(
+            json.dumps({
+                "event": "CONNECTED",
+                "restaurant_id": restaurant_id,
+                "message": "Subscribed to live kitchen display queue",
+            })
+        )
+    except Exception as e:
+        logger.warning(f"Could not send KDS init frame: {e}")
+        kds_connection_manager.disconnect(restaurant_id, websocket)
+        return
+
+    redis_client = kds_connection_manager.get_redis()
+    pubsub = redis_client.pubsub()
+    channel = f"channel:kds:{restaurant_id}"
+    await pubsub.subscribe(channel)
+
+    async def kds_redis_listener():
+        try:
+            async for message in pubsub.listen():
+                if message["type"] == "message":
+                    await websocket.send_text(message["data"])
+        except (WebSocketDisconnect, asyncio.CancelledError):
+            pass
+        except Exception as e:
+            logger.debug(f"KDS Redis listener ended: {e}")
+
+    async def kds_client_listener():
+        try:
+            while True:
+                msg = await websocket.receive_text()
+                if msg == "ping":
+                    await websocket.send_text("pong")
+        except (WebSocketDisconnect, asyncio.CancelledError):
+            pass
+        except Exception as e:
+            logger.debug(f"KDS client listener ended: {e}")
+
+    listener_task = asyncio.create_task(kds_redis_listener())
+    client_task = asyncio.create_task(kds_client_listener())
+
+    try:
+        done, pending = await asyncio.wait(
+            [listener_task, client_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for t in pending:
+            t.cancel()
+    finally:
+        kds_connection_manager.disconnect(restaurant_id, websocket)
+        try:
+            await pubsub.unsubscribe(channel)
+            await pubsub.close()
+        except Exception:
+            pass
+
+
+@app.websocket("/ws/kds/{restaurant_id}")
+async def ws_kds_direct(websocket: WebSocket, restaurant_id: str):
+    await _handle_kds_ws(websocket, restaurant_id)
+
+
+@app.websocket("/api/v1/ws/kds/{restaurant_id}")
+async def ws_kds_apiv1(websocket: WebSocket, restaurant_id: str):
+    await _handle_kds_ws(websocket, restaurant_id)
+

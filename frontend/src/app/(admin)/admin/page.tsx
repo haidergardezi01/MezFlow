@@ -8,6 +8,7 @@ import {
   DollarSign,
   TrendingUp,
   Settings,
+  ChefHat,
 } from "lucide-react";
 
 export default function AdminDashboardPage() {
@@ -42,6 +43,14 @@ export default function AdminDashboardPage() {
             >
               <QrCode className="w-4 h-4" />
               <span>Tables & QR Codes</span>
+            </Link>
+            <Link
+              href="/kds"
+              target="_blank"
+              className="flex items-center gap-3 px-3 py-2 rounded-xl text-brand-400 hover:text-white hover:bg-brand-500/10 transition-colors font-medium"
+            >
+              <ChefHat className="w-4 h-4" />
+              <span>Kitchen Display (KDS)</span>
             </Link>
             <a
               href="#"

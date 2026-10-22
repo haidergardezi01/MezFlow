@@ -1,60 +1,200 @@
+"use client";
+
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, ChefHat, Filter, RefreshCw } from "lucide-react";
+import { useAuthStore } from "@/lib/authStore";
+import { useKDSStore } from "@/lib/kdsStore";
+import { useKDSSocket } from "@/hooks/useKDSSocket";
+import { StationFilterBar } from "@/components/kds/StationFilterBar";
+import { OrderTicketCard } from "@/components/kds/OrderTicketCard";
+import {
+  ChefHat,
+  RotateCcw,
+  Sparkles,
+  Layers,
+  AlertCircle,
+  Loader2,
+  Clock,
+  ArrowLeft,
+  X,
+} from "lucide-react";
 
-export default function KitchenDisplayPage() {
+export default function KDSPage() {
+  const { user } = useAuthStore();
+  const restaurantId = user?.restaurant_id || "52dc0556-c8c6-4131-be96-6643f9cc35b0"; // Fallback to seeded demo restaurant
+
+  const {
+    orders,
+    summary,
+    selectedStation,
+    statusFilter,
+    soundEnabled,
+    isLoading,
+    recallToast,
+    error,
+    setSelectedStation,
+    setStatusFilter,
+    toggleSound,
+    clearRecallToast,
+    fetchActiveOrders,
+    fetchSummary,
+    bumpOrder,
+    recallOrder,
+    updateItemStatus,
+  } = useKDSStore();
+
+  const { isConnected } = useKDSSocket(restaurantId);
+
+  // Initial fetch & polling fallback (every 30s)
+  useEffect(() => {
+    fetchActiveOrders();
+    fetchSummary();
+
+    const interval = setInterval(() => {
+      fetchActiveOrders();
+      fetchSummary();
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, [fetchActiveOrders, fetchSummary]);
+
+  // Recall toast countdown effect
+  const [toastCountdown, setToastCountdown] = useState(60);
+
+  useEffect(() => {
+    if (!recallToast) return;
+    setToastCountdown(60);
+
+    const timer = setInterval(() => {
+      setToastCountdown((prev) => {
+        if (prev <= 1) {
+          clearRecallToast();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [recallToast, clearRecallToast]);
+
   return (
-    <div className="min-h-screen bg-surface-dark flex flex-col">
-      {/* KDS Header Bar */}
-      <header className="glass-panel border-b border-surface-border px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Link
-            href="/"
-            className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition-colors"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>Home</span>
-          </Link>
-          <div className="h-4 w-px bg-slate-700" />
-          <div className="flex items-center gap-2">
-            <ChefHat className="w-5 h-5 text-blue-400" />
-            <h1 className="text-base font-bold text-white tracking-wide">
-              Kitchen Display System (KDS)
-            </h1>
-          </div>
-        </div>
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-brand-500 selection:text-white">
+      {/* Station Navigation Header Bar */}
+      <StationFilterBar
+        selectedStation={selectedStation}
+        statusFilter={statusFilter}
+        summary={summary}
+        soundEnabled={soundEnabled}
+        isConnected={isConnected}
+        onSelectStation={setSelectedStation}
+        onSelectStatus={setStatusFilter}
+        onToggleSound={toggleSound}
+      />
 
-        {/* Action Controls */}
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 text-xs text-slate-400 glass-panel px-3 py-1.5 rounded-lg">
-            <Filter className="w-3.5 h-3.5 text-slate-400" />
-            <span>All Stations</span>
+      {/* Main Order Queue Viewport */}
+      <main className="flex-1 p-4 lg:p-6 overflow-y-auto">
+        {/* Error Banner */}
+        {error && (
+          <div className="mb-4 p-3 rounded-2xl bg-rose-500/20 border border-rose-500/40 text-rose-300 text-xs flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+              <span>{error}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => fetchActiveOrders()}
+              className="px-3 py-1 rounded-lg bg-rose-500 text-white font-bold text-[11px]"
+            >
+              Retry
+            </button>
           </div>
-          <button
-            type="button"
-            className="p-2 rounded-lg glass-panel text-slate-400 hover:text-white"
-            title="Refresh Orders"
-          >
-            <RefreshCw className="w-4 h-4" />
-          </button>
-        </div>
-      </header>
+        )}
 
-      {/* Main KDS Area */}
-      <main className="flex-1 p-6 flex items-center justify-center">
-        <div className="text-center max-w-md glass-panel p-8 rounded-2xl border border-dashed border-slate-700">
-          <ChefHat className="w-12 h-12 text-blue-400/60 mx-auto mb-4" />
-          <h2 className="text-lg font-bold text-white mb-2">
-            Kitchen Queue Ready
-          </h2>
-          <p className="text-xs text-slate-400 leading-relaxed mb-4">
-            Live order cards with status filters (New, Preparing, Ready, Delayed) and
-            category routing will be managed here under Module 4.
-          </p>
-          <span className="inline-block text-[11px] font-semibold text-blue-400 bg-blue-500/10 px-3 py-1 rounded-full border border-blue-500/20">
-            Awaiting Orders from Table Carts
-          </span>
-        </div>
+        {/* Loading State on first load */}
+        {isLoading && orders.length === 0 && (
+          <div className="py-24 flex flex-col items-center justify-center text-center">
+            <Loader2 className="w-10 h-10 text-brand-400 animate-spin mb-3" />
+            <h3 className="text-base font-bold text-white">
+              Connecting to Kitchen Queue...
+            </h3>
+            <p className="text-xs text-slate-400">
+              Fetching active table tickets and station routes
+            </p>
+          </div>
+        )}
+
+        {/* Empty State: All orders cleared */}
+        {!isLoading && orders.length === 0 && (
+          <div className="py-32 flex flex-col items-center justify-center text-center max-w-md mx-auto">
+            <div className="w-20 h-20 rounded-3xl bg-slate-900 border border-slate-800 flex items-center justify-center text-emerald-400 mb-4 shadow-xl">
+              <ChefHat className="w-10 h-10" />
+            </div>
+            <h2 className="text-xl font-black text-white tracking-tight">
+              All Orders Prepared!
+            </h2>
+            <p className="text-xs text-slate-400 mt-1 max-w-sm">
+              The kitchen display queue is clear. New incoming orders from dining
+              table QR sessions will pop up here in real time.
+            </p>
+          </div>
+        )}
+
+        {/* Responsive Multi-Column Kitchen Grid */}
+        {orders.length > 0 && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 items-start">
+            {orders.map((order) => (
+              <OrderTicketCard
+                key={order.id}
+                order={order}
+                onBump={bumpOrder}
+                onToggleItemStatus={async (orderId, itemId, currentStatus) => {
+                  await updateItemStatus(orderId, itemId, currentStatus);
+                }}
+              />
+            ))}
+          </div>
+        )}
       </main>
+
+      {/* Floating 60-Second Recall Toast / Snackbar (WP4.13) */}
+      {recallToast && (
+        <div className="fixed bottom-6 right-6 z-50 animate-slide-up">
+          <div className="p-4 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl text-white flex items-center gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-slate-300">
+                  Bumped #{recallToast.displayNumber}
+                </span>
+                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-amber-400 font-black">
+                  {toastCountdown}s
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-400 mt-0.5">
+                Tap undo to recall back to previous status
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => recallOrder(recallToast.orderId)}
+              className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-md shadow-amber-500/20 transition-all"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>UNDO</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={clearRecallToast}
+              aria-label="Dismiss toast"
+              className="text-slate-500 hover:text-white p-1"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

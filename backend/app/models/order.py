@@ -62,6 +62,11 @@ class Order(BaseModel):
     )
     notes = Column(Text, nullable=True)
     placed_at = Column(DateTime(timezone=True), default=get_utc_now, nullable=False)
+    confirmed_at = Column(DateTime(timezone=True), nullable=True)
+    preparing_started_at = Column(DateTime(timezone=True), nullable=True)
+    ready_at = Column(DateTime(timezone=True), nullable=True)
+    dispatched_at = Column(DateTime(timezone=True), nullable=True)
+    target_prep_minutes = Column(Integer, default=15, nullable=True)
 
     # Relationships
     restaurant = relationship("Restaurant")
@@ -73,6 +78,12 @@ class Order(BaseModel):
         back_populates="order",
         cascade="all, delete-orphan",
         order_by="OrderItem.created_at",
+    )
+    status_history = relationship(
+        "OrderStatusHistory",
+        back_populates="order",
+        cascade="all, delete-orphan",
+        order_by="desc(OrderStatusHistory.created_at)",
     )
 
 
@@ -102,6 +113,7 @@ class OrderItem(BaseModel):
     total_price = Column(Numeric(10, 2), nullable=False)
     special_instructions = Column(String(255), nullable=True)
     status = Column(String(30), default="PENDING", nullable=False)
+    prepared_at = Column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     order = relationship("Order", back_populates="items")
@@ -132,3 +144,28 @@ class OrderItemModifier(BaseModel):
 
     # Relationships
     order_item = relationship("OrderItem", back_populates="modifiers")
+
+
+class OrderStatusHistory(BaseModel):
+    __tablename__ = "order_status_history"
+
+    order_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("orders.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    changed_by_user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    previous_status = Column(String(30), nullable=False)
+    new_status = Column(String(30), nullable=False)
+    notes = Column(Text, nullable=True)
+
+    # Relationships
+    order = relationship("Order", back_populates="status_history")
+    changed_by = relationship("User")
+
