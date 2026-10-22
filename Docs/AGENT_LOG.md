@@ -261,30 +261,82 @@ This document serves as the authoritative, persistent operational log of all int
      - Ran full test suite: **22 of 22 tests passing (100%)** with 0 warnings.
      - Ran frontend TypeScript verification: `npx tsc --noEmit` exited cleanly with **0 errors**.
 
----
+#### Entry 1.15: Creation of Module 3 Implementation Plan (`M3_implementation_plan.md`)
+- **User Prompt:** *"Now create M3_implementation_plan.md file. Please just create it carefully and save into Docs/Plan file."*
+- **Actions Taken:**
+  - Analyzed project documentation, SRS requirements (`FR-M3-01` through `FR-M3-08`), and concurrency/performance specifications (`NFR-01`, `NFR-02`, `NFR-03`, `NFR-04`, `NFR-06`, `NFR-08`, `NFR-11`, `NFR-12`).
+  - Authored comprehensive `Docs/Plan/M3_implementation_plan.md` (25KB) covering:
+    - **Collaborative Table Sessions & Multi-Diner Presence:** `TableSession` lifecycle (`ACTIVE`, `SUBMITTING`, `COMPLETED`, `CLOSED`), automated table transition to `OCCUPIED`, diner onboarding with display names and avatar color badges.
+    - **Per-Diner Cart Attribution & Shared Cart:** `CartItem` and `CartItemModifier` models recording who added what dish, with line totals, modifier options, and cooking instructions.
+    - **Sub-2-Second Real-Time WebSocket Engine:** WebSocket endpoint (`/ws/sessions/{session_id}`) powered by Redis Pub/Sub (`channel:session:{session_id}`) broadcasting `DINER_JOINED`, `CART_UPDATED`, `ORDER_SUBMITTED`, and `ORDER_STATUS_CHANGED`.
+    - **Multi-Client Concurrency & Race-Condition Safeguards:** Atomic cart upsert operations, optimistic locking, and single-submission mutex lock (`UPDATE ... WHERE status = 'ACTIVE'`) preventing double ordering (`NFR-03`, `NFR-04`).
+    - **Zero-Trust Server-Authoritative Pricing:** Server recalculates all base prices and modifier deltas directly from the database; client-sent prices are strictly discarded (`NFR-06`).
+    - **Kitchen Dispatch Bridge:** Finalized order generation with sequential daily human-readable order number (e.g. `#042`) and instant Redis broadcast to `channel:kds:{restaurant_id}` for Module 4 KDS readiness.
+    - **Mobile PWA Shared Cart Experience:** Floating cart bar, full-height interactive shared drawer with diner view switcher (Grouped by Diner vs Unified), live presence indicators, order confirmation modal, and post-submission live tracking timeline.
+    - **4-Step Execution Roadmap:** 14 detailed Work Packages (`WP3.1` to `WP3.14`), 8 verification test cases (`TEST-M3-01` to `TEST-M3-08`), and Definition of Done (DoD).
 
-## 4. Current Repository State Summary
+278: ---
+279: 
+280: #### Entry 1.16: Full Implementation & Verification of Module 3 (Collaborative Table Ordering & Real-Time Shared Cart)
+281: - **User Prompt:** *"Now implement the Module 3 according to M3_implementation_plan.md carefully."*
+282: - **Actions Taken:**
+283:   1. **WP3.1 - WP3.3 Database Models, Migrations & Schemas:**
+284:      - Created `backend/app/models/session.py`: `TableSession` (with `SessionStatus` enum: `ACTIVE`, `SUBMITTING`, `COMPLETED`, `CLOSED`), `Diner`, `CartItem`, and `CartItemModifier`.
+285:      - Created `backend/app/models/order.py`: `Order` (with `OrderStatus` enum: `NEW`, `CONFIRMED`, `PREPARING`, `READY`, `DISPATCHED`, `CANCELLED`, sequential daily `order_number`, display number e.g. `ORD-042`), `OrderItem` (with station routing tags: `grill`, `fry`, `hot_kitchen`, `beverage`), and `OrderItemModifier`.
+286:      - Exported models in `backend/app/models/__init__.py`.
+287:      - Generated and applied Alembic migration `backend/alembic/versions/a83b4c91d20e_003_module3_collaborative_ordering.py` with foreign keys (`ON DELETE CASCADE`), indexes, and unique constraints.
+288:      - Created `backend/app/schemas/session.py` and `backend/app/schemas/order.py` with strict Pydantic validation schemas.
+289:   2. **WP3.4 - WP3.8 Backend Services, Concurrency Engine & KDS Bridge:**
+290:      - Created `pricing_service.py`: Zero-trust server-authoritative price calculation (`NFR-06`), client-sent prices discarded, sold-out (86ed) check, and modifier bounds validation.
+291:      - Created `session_service.py`: Automated table session creation/lookup via QR code token, automatic table status transition to `OCCUPIED`, diner onboarding and session resumption.
+292:      - Created `cart_service.py`: Shared cart calculations, atomic item additions and deduplication, quantity increments, item removals, cart clearing, and Redis Pub/Sub broadcast (`channel:session:{session_id}`).
+293:      - Created `order_service.py`: Concurrency mutex lock (`status = 'SUBMITTING'`) preventing double-ordering (`NFR-04`), daily sequential `order_number` generation (`ORD-042`), snapshotting order items and modifier options, and publishing `NEW_ORDER` to `channel:kds:{restaurant_id}`.
+294:      - Extended `realtime.py` with `SessionConnectionManager`, custom JSON encoder (`MezFlowJsonEncoder` handling UUID and Decimal serialization), and dual WebSocket routes (`/ws/sessions/{session_id}` and `/api/v1/ws/sessions/{session_id}`) with ping/pong heartbeats.
+295:      - Exposed REST endpoints in `orders.py` and `sessions.py`, registered under `/api/v1/orders` and `/api/v1/sessions` in `backend/app/api/v1/api.py`.
+296:   3. **WP3.9 - WP3.13 Customer Mobile PWA Collaborative Experience:**
+297:      - Created `frontend/src/types/menu.ts` Module 3 interfaces (`Diner`, `CartItemModifier`, `CartItem`, `CartResponse`, `TableSession`, `OrderItemModifier`, `OrderItem`, `Order`, `OrderStatus`).
+298:      - Configured `frontend/src/lib/api.ts` request interceptor to automatically inject `X-Diner-ID` header.
+299:      - Created `frontend/src/lib/cartStore.ts` Zustand store managing collaborative cart state, diner persistence, and async operations.
+300:      - Created `frontend/src/hooks/useTableSession.ts` WebSocket hook handling `DINER_JOINED`, `CART_UPDATED`, `ORDER_SUBMITTED`, and `ORDER_STATUS_CHANGED` with exponential backoff auto-reconnect.
+301:      - Created `frontend/src/components/customer/DinerJoinModal.tsx` onboarding modal with 7 avatar color chips and name validation.
+302:      - Created `frontend/src/components/customer/DinerBadge.tsx` avatar attribution chip ("Added by You" vs peer diners).
+303:      - Created `frontend/src/components/customer/FloatingCartBar.tsx` sticky bottom bar with item count, active diner avatar stack, and live PKR total.
+304:      - Created `frontend/src/components/customer/SharedCartDrawer.tsx` full-height bottom sheet with view switcher (**Grouped by Diner** vs **Unified**), quantity steppers, special instructions, and clear cart.
+305:      - Created `frontend/src/components/customer/SubmitOrderModal.tsx` confirmation modal with kitchen instructions note box.
+306:      - Created `frontend/src/app/(customer)/r/[restaurantId]/t/[tableId]/order/[orderId]/page.tsx` post-submission live tracker with visual status timeline (`NEW` ➔ `CONFIRMED` ➔ `PREPARING` ➔ `READY` ➔ `DISPATCHED`), real-time status sync, and "Order More Items" navigation.
+307:      - Integrated all components into `frontend/src/app/(customer)/r/[restaurantId]/t/[tableId]/page.tsx` with live presence bar, auto-join, and collaborative toast alerts.
+308:   4. **WP3.14 Verification & Testing:**
+309:      - Created automated test suite `backend/tests/test_collaborative_cart.py` covering all 8 acceptance tests (`TEST-M3-01` through `TEST-M3-08`).
+310:      - Ran full pytest suite: **30 of 30 tests passing (100%)** with zero failures across the entire backend.
+311:      - Ran frontend TypeScript verification: `npx tsc --noEmit` exited cleanly with **0 errors**.
+312: 
+313: ---
+314: 
+315: ## 4. Current Repository State Summary
+316: 
+317: * **Branch:** `main`
+318: * **Milestone Achieved:** **FYP-I 25% Mid-Phase Milestone Deliverable (M0, M1, M2, and M3 100% COMPLETE)**
+319: * **Code Implementation Status:**
+320:   - **Module 0 (Foundation & Scaffolding):** 100% Complete & Verified (Docker, FastAPI, Next.js, Alembic migrations).
+321:   - **Module 1 (Identity & Access Control):** 100% Complete & Verified (Staff JWT, Customer OTP with 5-attempt brute-force protection, RBAC, tenant isolation).
+322:   - **Module 2 (Digital Menu & QR Table Access):** 100% Complete & Verified (Bilingual menu, cryptographic table QR tokens, structured modifiers, instant 86ing broadcast over Redis/WebSocket, customer mobile PWA, manager QR acrylic stand generator).
+323:   - **Module 3 (Collaborative Table Ordering & Real-Time Cart):** 100% Complete & Verified (Multi-diner shared table sessions, sub-2s cart sync, zero-trust server pricing, atomic double-submission lock, KDS dispatch bridge, live tracking timeline).
+324: * **Database State:**
+325:   - PostgreSQL running on port `5433` (Docker container `mezflow-postgres`).
+326:   - Redis running on port `6379` (Docker container `mezflow-redis`).
+327:   - Applied migrations: `5bc4682e3062` (001_initial_schema), `7c2e3f4a8b91` (002_module2_menu_modifiers), `a83b4c91d20e` (003_module3_collaborative_ordering).
+328:   - Seeded demo restaurant *"MezFlow Bistro"* (`52dc0556-c8c6-4131-be96-6643f9cc35b0`), 10 tables with cryptographic QR tokens, bilingual categories, dishes with structured AI attributes, modifier groups, and test staff accounts.
+329: * **Server Status:**
+330:   - FastAPI Backend active on port `8000` (`http://localhost:8000`).
+331:   - Next.js Frontend active on port `3001` (`http://localhost:3001`).
+332: 
+333: ---
+334: 
+335: ## 5. Next Steps Queue
+336: 
+337: 1. [x] Complete Module 0, Module 1, Module 2, and Module 3 implementation and verification (25% FYP-I Milestone Achieved).
+338: 2. [ ] Initiate planning for **Module 4: Kitchen Display System (KDS) & Order Processing Pipeline** (`M4_implementation_plan.md`) to consume dispatched orders from `channel:kds:{restaurant_id}` across kitchen stations (`grill`, `fry`, `hot_kitchen`, `beverage`).
 
-* **Branch:** `main`
-* **Code Implementation Status:**
-  - **Module 0 (Foundation & Scaffolding):** 100% Complete & Verified (Docker, FastAPI, Next.js, Alembic migrations).
-  - **Module 1 (Identity & Access Control):** 100% Complete & Verified (Staff JWT, Customer OTP with 5-attempt brute-force protection, RBAC, tenant isolation).
-  - **Module 2 (Digital Menu & QR Table Access):** 100% Complete & Verified (Bilingual menu, cryptographic table QR tokens, structured modifiers, instant 86ing broadcast over Redis/WebSocket, customer mobile PWA, manager QR acrylic stand generator).
-* **Database State:**
-  - PostgreSQL running on port `5433` (Docker container `mezflow-postgres`).
-  - Redis running on port `6379` (Docker container `mezflow-redis`).
-  - Applied migrations: `5bc4682e3062` (001_initial_schema), `7c2e3f4a8b91` (002_module2_menu_modifiers).
-  - Seeded demo restaurant *"MezFlow Bistro"* (`52dc0556-c8c6-4131-be96-6643f9cc35b0`), 10 tables with cryptographic QR tokens, bilingual categories, dishes with structured AI attributes, modifier groups, and test staff accounts.
-* **Server Status:**
-  - FastAPI Backend active on port `8000` (`http://localhost:8000`).
-  - Next.js Frontend active on port `3001` (`http://localhost:3001`).
-
----
-
-## 5. Next Steps Queue
-
-1. [x] Staged, committed (`c89a9c0`), and pushed Module 2 deliverables to `origin/main`.
-2. [ ] Proceed to **Module 3: Collaborative Table Ordering & Real-Time Cart** according to `Docs/Plan/M3_implementation_plan.md`.
 
 
 

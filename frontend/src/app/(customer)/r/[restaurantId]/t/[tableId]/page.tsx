@@ -1,16 +1,22 @@
 "use client";
 
-import React, { useEffect, useState, useMemo, useRef } from "react";
+import React, { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import apiClient from "@/lib/api";
 import { useAuthStore } from "@/lib/authStore";
+import { useCartStore } from "@/lib/cartStore";
 import { useMenuRealtime, RealtimeMenuEvent } from "@/hooks/useMenuRealtime";
+import { useTableSession } from "@/hooks/useTableSession";
 import { DishCard } from "@/components/customer/DishCard";
 import { ModifierModal } from "@/components/customer/ModifierModal";
+import { DinerJoinModal } from "@/components/customer/DinerJoinModal";
+import { DinerBadge } from "@/components/customer/DinerBadge";
+import { FloatingCartBar } from "@/components/customer/FloatingCartBar";
+import { SharedCartDrawer } from "@/components/customer/SharedCartDrawer";
+import { SubmitOrderModal } from "@/components/customer/SubmitOrderModal";
 import {
   PublicMenuResponse,
-  MenuCategory,
   MenuItem,
   TableLookup,
   SelectedModifier,
@@ -26,17 +32,45 @@ import {
   Loader2,
   Utensils,
   Search,
+  Users,
+  Check,
+  Bell,
 } from "lucide-react";
 
 export default function CustomerTablePage() {
   const params = useParams();
+  const router = useRouter();
   const restaurantSlugOrId = params.restaurantId as string;
   const tableTokenOrId = params.tableId as string;
 
   const { language, setLanguage } = useAuthStore();
   const isUrdu = language === "ur";
 
-  // Data States
+  // Collaborative Cart Zustand Store
+  const {
+    session,
+    currentDiner,
+    cart,
+    activeDiners,
+    isDrawerOpen,
+    isSubmitModalOpen,
+    isDinerModalOpen,
+    isSubmitting,
+    notification,
+    joinSession,
+    addItem,
+    updateItemQuantity,
+    removeItem,
+    clearCart,
+    submitOrder,
+    setIsDrawerOpen,
+    setIsSubmitModalOpen,
+    setIsDinerModalOpen,
+    loadSavedIdentity,
+    clearNotification,
+  } = useCartStore();
+
+  // Local Page States
   const [tableInfo, setTableInfo] = useState<TableLookup | null>(null);
   const [menu, setMenu] = useState<PublicMenuResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -46,14 +80,11 @@ export default function CustomerTablePage() {
   const [activeCategory, setActiveCategory] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Modal State
+  // Modal State for dish customization
   const [selectedDish, setSelectedDish] = useState<MenuItem | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
-  // Local cart session counter (Precursor to Module 3 live collaborative cart)
-  const [cartItemsCount, setCartItemsCount] = useState(0);
-
-  // Load Table & Menu
+  // Load Table Lookup & Menu
   useEffect(() => {
     let isMounted = true;
 
@@ -78,6 +109,20 @@ export default function CustomerTablePage() {
         if (menuRes.data.categories.length > 0) {
           setActiveCategory(menuRes.data.categories[0].id);
         }
+
+        // 3. Auto-join session if saved identity exists, else open Onboarding modal
+        const { savedDisplayName, savedAvatarColor } = loadSavedIdentity();
+        if (savedDisplayName) {
+          try {
+            await joinSession(
+              tableTokenOrId,
+              savedDisplayName,
+              savedAvatarColor || "#F59E0B"
+            );
+          } catch (joinErr) {
+            console.warn("Auto-join session error:", joinErr);
+          }
+        }
       } catch (err: any) {
         if (!isMounted) return;
         setError(
@@ -93,12 +138,10 @@ export default function CustomerTablePage() {
     return () => {
       isMounted = false;
     };
-  }, [tableTokenOrId, language]);
+  }, [tableTokenOrId, language, joinSession, loadSavedIdentity]);
 
-  // Real-time WebSocket hook for live 86ing & price changes (< 2s)
-  const handleRealtimeEvent = (evt: RealtimeMenuEvent) => {
-    if (!menu) return;
-
+  // Real-time WebSocket hook for Menu 86ing & price changes (< 2s)
+  const handleRealtimeMenuEvent = useCallback((evt: RealtimeMenuEvent) => {
     if (evt.event === "ITEM_AVAILABILITY_CHANGED" && evt.item_id) {
       setMenu((prev) => {
         if (!prev) return prev;
@@ -135,11 +178,29 @@ export default function CustomerTablePage() {
         };
       });
     }
-  };
+  }, []);
 
-  const { isConnected } = useMenuRealtime(
+  const { isConnected: isMenuConnected } = useMenuRealtime(
     tableInfo?.restaurant_id,
-    handleRealtimeEvent
+    handleRealtimeMenuEvent
+  );
+
+  // Real-time Collaborative Session WebSocket hook (< 2s sync)
+  const handleOrderSubmitted = useCallback(
+    (evt: any) => {
+      if (evt.order_id) {
+        router.push(
+          `/r/${restaurantSlugOrId}/t/${tableTokenOrId}/order/${evt.order_id}`
+        );
+      }
+    },
+    [router, restaurantSlugOrId, tableTokenOrId]
+  );
+
+  const { isConnected: isSessionConnected } = useTableSession(
+    session?.id,
+    currentDiner?.id,
+    handleOrderSubmitted
   );
 
   // Scrollspy observer for active category
@@ -178,19 +239,45 @@ export default function CustomerTablePage() {
       .filter((cat) => cat.items.length > 0);
   }, [menu, searchQuery]);
 
+  // Open Dish Modal or prompt Join Table
   const handleOpenDish = (dish: MenuItem) => {
+    if (!currentDiner) {
+      setIsDinerModalOpen(true);
+      return;
+    }
     setSelectedDish(dish);
     setIsModalOpen(true);
   };
 
-  const handleAddToCart = (payload: {
+  // Add Item to Shared Cart via server-authoritative endpoint
+  const handleAddToCart = async (payload: {
     item: MenuItem;
     selectedModifiers: SelectedModifier[];
     specialInstructions: string;
     quantity: number;
     calculatedTotal: number;
   }) => {
-    setCartItemsCount((prev) => prev + payload.quantity);
+    if (!session || !currentDiner) {
+      setIsDinerModalOpen(true);
+      return;
+    }
+
+    try {
+      const modifierOptionIds = payload.selectedModifiers.map(
+        (m) => m.option_id
+      );
+
+      await addItem(session.id, currentDiner.id, {
+        item_id: payload.item.id,
+        quantity: payload.quantity,
+        selected_modifier_option_ids: modifierOptionIds,
+        special_instructions: payload.specialInstructions || undefined,
+      });
+
+      setIsModalOpen(false);
+    } catch {
+      // Toast handles error message
+    }
   };
 
   // Loading State
@@ -221,7 +308,8 @@ export default function CustomerTablePage() {
           {isUrdu ? "کیو آر کوڈ تصدیق ناکام" : "Table Access Failed"}
         </h2>
         <p className="text-xs text-slate-400 max-w-sm mb-6 leading-relaxed">
-          {error || "We could not verify this tabletop QR code. It may have expired or been regenerated by restaurant staff."}
+          {error ||
+            "We could not verify this tabletop QR code. It may have expired or been regenerated by restaurant staff."}
         </p>
         <div className="flex gap-3">
           <Link
@@ -242,11 +330,33 @@ export default function CustomerTablePage() {
     );
   }
 
+  const tableNameDisplay = tableInfo.table_name || `Table ${tableInfo.table_number}`;
+  const totalCartCount = cart?.item_count || 0;
+
   return (
     <div
-      className="min-h-screen bg-surface-dark text-slate-100 pb-28"
+      className="min-h-screen bg-surface-dark text-slate-100 pb-28 relative"
       dir={isUrdu ? "rtl" : "ltr"}
     >
+      {/* Real-time Collaborative Toast Notification Pill */}
+      {notification && (
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 animate-slide-down">
+          <div
+            onClick={clearNotification}
+            className={`px-4 py-2 rounded-2xl text-xs font-bold shadow-xl flex items-center gap-2 cursor-pointer transition-all border ${
+              notification.type === "success"
+                ? "bg-emerald-600/90 text-white border-emerald-400/40 backdrop-blur-md"
+                : notification.type === "warn"
+                ? "bg-rose-600/90 text-white border-rose-400/40 backdrop-blur-md"
+                : "bg-surface-card/95 text-brand-300 border-surface-border backdrop-blur-md"
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5 shrink-0" />
+            <span>{notification.message}</span>
+          </div>
+        </div>
+      )}
+
       {/* Top App Header */}
       <header className="sticky top-0 z-40 glass-panel border-b border-surface-border px-4 py-3 flex items-center justify-between shadow-md">
         <div className="flex items-center gap-2.5">
@@ -255,56 +365,86 @@ export default function CustomerTablePage() {
             className="p-1.5 rounded-lg glass-panel text-slate-400 hover:text-white transition-colors"
             aria-label="Home"
           >
-            <ArrowLeft className="w-4 h-4" />
+            <ArrowLeft className="w-4 h-4 rtl:rotate-180" />
           </Link>
+
           <div>
             <div className="flex items-center gap-1.5">
               <h1 className="text-sm font-extrabold text-white tracking-tight">
                 {tableInfo.restaurant_name}
               </h1>
-              {isConnected ? (
+              {isSessionConnected || isMenuConnected ? (
                 <span
                   title="Live kitchen sync active (< 2s)"
                   className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"
                 />
               ) : (
                 <span
-                  title="Reconnecting to kitchen live sync..."
+                  title="Connecting to table live sync..."
                   className="w-2 h-2 rounded-full bg-amber-400"
                 />
               )}
             </div>
+
             <div className="flex items-center gap-1.5 text-[11px] font-semibold text-brand-400">
               <span className="bg-brand-500/10 px-2 py-0.5 rounded-md border border-brand-500/20">
-                {tableInfo.table_name || `Table ${tableInfo.table_number}`}
+                {tableNameDisplay}
               </span>
             </div>
           </div>
         </div>
 
-        {/* Right Controls: Language switch & Cart button */}
+        {/* Right Controls: Diner Presence Pill, Language Switch & Cart Icon */}
         <div className="flex items-center gap-2">
+          {/* Active Diner Presence / Onboarding Pill (WP3.12) */}
+          {currentDiner ? (
+            <button
+              type="button"
+              onClick={() => setIsDinerModalOpen(true)}
+              className="px-2.5 py-1.5 rounded-xl glass-panel text-xs border border-surface-border flex items-center gap-1.5 hover:border-brand-500/40 transition-colors"
+              title="Click to edit your diner name or color"
+            >
+              <DinerBadge
+                name={currentDiner.display_name}
+                avatarColor={currentDiner.avatar_color}
+                isYou
+                size="xs"
+                showLabel={true}
+              />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setIsDinerModalOpen(true)}
+              className="px-2.5 py-1.5 rounded-xl bg-brand-500/15 border border-brand-500/30 text-brand-300 text-xs font-bold flex items-center gap-1 hover:bg-brand-500/25 transition-colors"
+            >
+              <Users className="w-3.5 h-3.5" />
+              <span>{isUrdu ? "شامل ہوں" : "Join Table"}</span>
+            </button>
+          )}
+
           {/* Language Toggle */}
           <button
             type="button"
             onClick={() => setLanguage(isUrdu ? "en" : "ur")}
-            className="px-2.5 py-1.5 rounded-xl glass-panel text-xs font-semibold text-slate-300 hover:text-white border border-surface-border flex items-center gap-1.5"
+            className="px-2 py-1.5 rounded-xl glass-panel text-xs font-semibold text-slate-300 hover:text-white border border-surface-border flex items-center gap-1"
             aria-label="Toggle Language"
           >
             <Languages className="w-3.5 h-3.5 text-brand-400" />
-            <span>{isUrdu ? "English" : "اردو"}</span>
+            <span>{isUrdu ? "EN" : "اردو"}</span>
           </button>
 
-          {/* Cart Icon */}
+          {/* Cart Icon / Drawer Trigger */}
           <button
             type="button"
-            aria-label="Shopping Cart"
+            onClick={() => setIsDrawerOpen(true)}
+            aria-label="Open Cart Drawer"
             className="relative p-2.5 rounded-xl bg-brand-500/15 border border-brand-500/30 text-brand-300 hover:bg-brand-500/25 transition-all"
           >
             <ShoppingBag className="w-4 h-4" />
-            {cartItemsCount > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-brand-500 text-white text-[10px] font-black rounded-full flex items-center justify-center shadow-md">
-                {cartItemsCount}
+            {totalCartCount > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-brand-500 text-white text-[10px] font-black rounded-full flex items-center justify-center shadow-md animate-scale-in">
+                {totalCartCount}
               </span>
             )}
           </button>
@@ -312,26 +452,37 @@ export default function CustomerTablePage() {
       </header>
 
       {/* Main Container */}
-      <main className="max-w-2xl mx-auto px-4 pt-4">
-        {/* Real-time sync banner indicator */}
-        <div className="flex items-center justify-between text-[11px] text-slate-400 mb-3 px-1">
-          <div className="flex items-center gap-1.5">
-            {isConnected ? (
-              <span className="text-emerald-400 flex items-center gap-1 font-medium">
-                <Wifi className="w-3 h-3" />
-                <span>{isUrdu ? "کچن لائیو رابطہ فعال" : "Live Kitchen Sync Active"}</span>
+      <main className="max-w-2xl mx-auto px-4 pt-3">
+        {/* Table Collaborative Presence Bar (WP3.12) */}
+        {activeDiners.length > 0 && (
+          <div className="flex items-center justify-between text-xs glass-panel px-3.5 py-2 rounded-2xl border border-surface-border mb-3">
+            <div className="flex items-center gap-2">
+              <div className="flex -space-x-1.5 rtl:space-x-reverse overflow-hidden">
+                {activeDiners.slice(0, 5).map((d) => (
+                  <div
+                    key={d.id}
+                    className="w-5 h-5 rounded-full border border-surface-dark flex items-center justify-center text-[9px] font-black text-white"
+                    style={{ backgroundColor: d.avatar_color }}
+                    title={d.display_name}
+                  >
+                    {d.display_name.slice(0, 1).toUpperCase()}
+                  </div>
+                ))}
+              </div>
+
+              <span className="text-[11px] text-slate-300 font-medium">
+                {isUrdu
+                  ? `${activeDiners.length} افراد ٹیبل پر موجود ہیں`
+                  : `${activeDiners.length} diners collaborating at table`}
               </span>
-            ) : (
-              <span className="text-amber-400 flex items-center gap-1 font-medium">
-                <WifiOff className="w-3 h-3" />
-                <span>{isUrdu ? "دوبارہ رابطہ کیا جا رہا ہے..." : "Reconnecting Live Sync..."}</span>
-              </span>
-            )}
+            </div>
+
+            <span className="text-[10px] text-emerald-400 flex items-center gap-1 font-semibold">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span>{isUrdu ? "لائیو سنک فعال" : "Live Sync"}</span>
+            </span>
           </div>
-          <span className="text-[10px] text-slate-500">
-            {isUrdu ? "قیمتیں و دستیابی حقیقی وقت میں" : "Prices & 86ing synced in real time"}
-          </span>
-        </div>
+        )}
 
         {/* Search Bar */}
         <div className="relative mb-4">
@@ -377,7 +528,8 @@ export default function CustomerTablePage() {
         {/* Categories & Dishes Section */}
         <div className="space-y-8 mt-5">
           {filteredCategories.map((category) => {
-            const catName = isUrdu && category.name_ur ? category.name_ur : category.name;
+            const catName =
+              isUrdu && category.name_ur ? category.name_ur : category.name;
             const catDesc =
               isUrdu && category.description_ur
                 ? category.description_ur
@@ -433,6 +585,76 @@ export default function CustomerTablePage() {
           )}
         </div>
       </main>
+
+      {/* Floating Bottom Cart Bar (WP3.11) */}
+      <FloatingCartBar
+        cart={cart}
+        activeDiners={activeDiners}
+        currentDinerId={currentDiner?.id}
+        isUrdu={isUrdu}
+        onOpenDrawer={() => setIsDrawerOpen(true)}
+      />
+
+      {/* Shared Cart Full-Height Drawer (WP3.11) */}
+      <SharedCartDrawer
+        isOpen={isDrawerOpen}
+        cart={cart}
+        activeDiners={activeDiners}
+        currentDinerId={currentDiner?.id}
+        tableName={tableNameDisplay}
+        isUrdu={isUrdu}
+        onClose={() => setIsDrawerOpen(false)}
+        onUpdateQuantity={async (cartItemId, newQty) => {
+          if (!session || !currentDiner) return;
+          await updateItemQuantity(session.id, cartItemId, currentDiner.id, newQty);
+        }}
+        onRemoveItem={async (cartItemId) => {
+          if (!session || !currentDiner) return;
+          await removeItem(session.id, cartItemId, currentDiner.id);
+        }}
+        onClearCart={async () => {
+          if (!session || !currentDiner) return;
+          await clearCart(session.id, currentDiner.id);
+        }}
+        onSubmitOrder={() => {
+          setIsDrawerOpen(false);
+          setIsSubmitModalOpen(true);
+        }}
+      />
+
+      {/* Order Submission Confirmation Dialog (WP3.13) */}
+      <SubmitOrderModal
+        isOpen={isSubmitModalOpen}
+        cart={cart}
+        tableName={tableNameDisplay}
+        isUrdu={isUrdu}
+        isSubmitting={isSubmitting}
+        onClose={() => setIsSubmitModalOpen(false)}
+        onConfirm={async (notes) => {
+          if (!session || !currentDiner) return;
+          const createdOrder = await submitOrder(
+            session.id,
+            currentDiner.id,
+            notes
+          );
+          router.push(
+            `/r/${restaurantSlugOrId}/t/${tableTokenOrId}/order/${createdOrder.id}`
+          );
+        }}
+      />
+
+      {/* Diner Onboarding Modal (WP3.9) */}
+      <DinerJoinModal
+        isOpen={isDinerModalOpen}
+        tableName={tableNameDisplay}
+        restaurantName={tableInfo.restaurant_name}
+        isUrdu={isUrdu}
+        initialName={currentDiner?.display_name || ""}
+        initialColor={currentDiner?.avatar_color}
+        onJoin={async (name, color) => {
+          await joinSession(tableTokenOrId, name, color);
+        }}
+      />
 
       {/* Interactive Dish Customization Bottom Sheet Modal (WP2.10) */}
       <ModifierModal

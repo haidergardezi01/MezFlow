@@ -111,3 +111,124 @@ export interface SelectedModifier {
   option_name: string;
   price_delta: number;
 }
+
+// -----------------------------------------------------------------------------
+// Module 3: Collaborative Dining Session, Cart & Order Types
+// -----------------------------------------------------------------------------
+
+export interface Diner {
+  id: string;
+  session_id: string;
+  user_id?: string | null;
+  display_name: string;
+  avatar_color: string;
+  client_session_id: string;
+  is_host: boolean;
+  is_active: boolean;
+  joined_at: string;
+}
+
+export interface CartItemModifier {
+  id: string;
+  modifier_option_id: string;
+  option_name: string;
+  price_delta: number | string;
+}
+
+export interface CartItem {
+  id: string;
+  session_id: string;
+  item_id: string;
+  item_name: string;
+  item_name_ur?: string | null;
+  base_price: number | string;
+  diner_id: string;
+  diner_name: string;
+  avatar_color: string;
+  quantity: number;
+  special_instructions?: string | null;
+  modifiers: CartItemModifier[];
+  unit_price: number | string;
+  line_total: number | string;
+  created_at: string;
+}
+
+export interface CartResponse {
+  session_id: string;
+  restaurant_id: string;
+  table_id: string;
+  table_number: number;
+  status: string;
+  items: CartItem[];
+  diners: Diner[];
+  subtotal: number | string;
+  tax_amount: number | string;
+  total_amount: number | string;
+  currency: string;
+  item_count: number;
+}
+
+export interface TableSession {
+  id: string;
+  restaurant_id: string;
+  table_id: string;
+  table_number: number;
+  session_token: string;
+  status: string;
+  host_diner_id?: string | null;
+  opened_at: string;
+  total_amount: number | string;
+  current_diner?: Diner | null;
+  diners: Diner[];
+  cart?: CartResponse | null;
+}
+
+export interface OrderItemModifier {
+  id: string;
+  modifier_option_id?: string | null;
+  option_name: string;
+  price_delta: number | string;
+}
+
+export interface OrderItem {
+  id: string;
+  item_id?: string | null;
+  diner_id?: string | null;
+  diner_name?: string | null;
+  item_name: string;
+  kitchen_station: string;
+  quantity: number;
+  unit_price: number | string;
+  total_price: number | string;
+  special_instructions?: string | null;
+  status: string;
+  modifiers: OrderItemModifier[];
+  created_at: string;
+}
+
+export type OrderStatus =
+  | "NEW"
+  | "CONFIRMED"
+  | "PREPARING"
+  | "READY"
+  | "DISPATCHED"
+  | "CANCELLED";
+
+export interface Order {
+  id: string;
+  restaurant_id: string;
+  table_id: string;
+  table_number: number;
+  session_id?: string | null;
+  order_number: number;
+  display_number: string;
+  status: OrderStatus;
+  subtotal: number | string;
+  tax_amount: number | string;
+  total_amount: number | string;
+  placed_by_diner_name?: string | null;
+  notes?: string | null;
+  placed_at: string;
+  items: OrderItem[];
+  currency: string;
+}

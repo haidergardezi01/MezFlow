@@ -5,7 +5,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.api import api_router
 from app.core.config import settings
-from app.services.realtime import menu_connection_manager
+from app.services.realtime import menu_connection_manager, session_connection_manager
 
 logger = logging.getLogger("mezflow.app")
 
@@ -42,6 +42,9 @@ async def root():
     }
 
 
+# =============================================================================
+# MENU WEBSOCKET ENDPOINT
+# =============================================================================
 async def _handle_menu_ws(websocket: WebSocket, restaurant_id: str):
     await menu_connection_manager.connect(restaurant_id, websocket)
     try:
@@ -53,7 +56,7 @@ async def _handle_menu_ws(websocket: WebSocket, restaurant_id: str):
             })
         )
     except Exception as e:
-        logger.warning(f"Could not send init frame: {e}")
+        logger.warning(f"Could not send menu init frame: {e}")
         menu_connection_manager.disconnect(restaurant_id, websocket)
         return
 
@@ -63,7 +66,7 @@ async def _handle_menu_ws(websocket: WebSocket, restaurant_id: str):
     try:
         await pubsub.subscribe(channel)
     except Exception as e:
-        logger.error(f"Redis subscribe failed: {e}")
+        logger.error(f"Redis subscribe failed for menu: {e}")
 
     async def redis_listener():
         try:
@@ -76,7 +79,7 @@ async def _handle_menu_ws(websocket: WebSocket, restaurant_id: str):
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logger.debug(f"Redis listener ended: {e}")
+            logger.debug(f"Menu Redis listener ended: {e}")
 
     async def client_listener():
         try:
@@ -87,7 +90,7 @@ async def _handle_menu_ws(websocket: WebSocket, restaurant_id: str):
         except (WebSocketDisconnect, asyncio.CancelledError):
             pass
         except Exception as e:
-            logger.debug(f"Client listener ended: {e}")
+            logger.debug(f"Menu client listener ended: {e}")
 
     listener_task = asyncio.create_task(redis_listener())
     client_task = asyncio.create_task(client_listener())
@@ -116,3 +119,82 @@ async def ws_menu_direct(websocket: WebSocket, restaurant_id: str):
 @app.websocket("/api/v1/ws/restaurants/{restaurant_id}/menu")
 async def ws_menu_apiv1(websocket: WebSocket, restaurant_id: str):
     await _handle_menu_ws(websocket, restaurant_id)
+
+
+# =============================================================================
+# COLLABORATIVE TABLE SESSION WEBSOCKET ENDPOINT
+# =============================================================================
+async def _handle_session_ws(websocket: WebSocket, session_id: str):
+    await session_connection_manager.connect(session_id, websocket)
+    try:
+        await websocket.send_text(
+            json.dumps({
+                "event": "CONNECTED",
+                "session_id": session_id,
+                "message": "Subscribed to live collaborative table session",
+            })
+        )
+    except Exception as e:
+        logger.warning(f"Could not send session init frame: {e}")
+        session_connection_manager.disconnect(session_id, websocket)
+        return
+
+    redis = session_connection_manager.get_redis()
+    pubsub = redis.pubsub()
+    channel = f"channel:session:{session_id}"
+    try:
+        await pubsub.subscribe(channel)
+    except Exception as e:
+        logger.error(f"Redis subscribe failed for session: {e}")
+
+    async def session_redis_listener():
+        try:
+            async for msg in pubsub.listen():
+                if msg and msg.get("type") == "message":
+                    payload = msg.get("data")
+                    if isinstance(payload, bytes):
+                        payload = payload.decode("utf-8")
+                    await websocket.send_text(payload)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.debug(f"Session Redis listener ended: {e}")
+
+    async def session_client_listener():
+        try:
+            while True:
+                msg = await websocket.receive_text()
+                if msg == "ping":
+                    await websocket.send_text("pong")
+        except (WebSocketDisconnect, asyncio.CancelledError):
+            pass
+        except Exception as e:
+            logger.debug(f"Session client listener ended: {e}")
+
+    listener_task = asyncio.create_task(session_redis_listener())
+    client_task = asyncio.create_task(session_client_listener())
+
+    try:
+        done, pending = await asyncio.wait(
+            [listener_task, client_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for t in pending:
+            t.cancel()
+    finally:
+        session_connection_manager.disconnect(session_id, websocket)
+        try:
+            await pubsub.unsubscribe(channel)
+            await pubsub.close()
+        except Exception:
+            pass
+
+
+@app.websocket("/ws/sessions/{session_id}")
+async def ws_session_direct(websocket: WebSocket, session_id: str):
+    await _handle_session_ws(websocket, session_id)
+
+
+@app.websocket("/api/v1/ws/sessions/{session_id}")
+async def ws_session_apiv1(websocket: WebSocket, session_id: str):
+    await _handle_session_ws(websocket, session_id)

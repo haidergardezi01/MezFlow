@@ -12,13 +12,17 @@ export const apiClient: AxiosInstance = axios.create({
   },
 });
 
-// Request interceptor: Inject Bearer token if present
+// Request interceptor: Inject Bearer token or Diner ID if present
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     if (typeof window !== "undefined") {
       const token = localStorage.getItem("mezflow_token");
       if (token && config.headers) {
         config.headers.Authorization = `Bearer ${token}`;
+      }
+      const dinerId = localStorage.getItem("mezflow_diner_id");
+      if (dinerId && config.headers && !config.headers["X-Diner-ID"]) {
+        config.headers["X-Diner-ID"] = dinerId;
       }
     }
     return config;

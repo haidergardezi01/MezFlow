@@ -1,5 +1,6 @@
 import json
 import logging
+from decimal import Decimal
 from typing import Dict, Set
 from uuid import UUID
 import redis.asyncio as aioredis
@@ -10,10 +11,12 @@ from app.core.config import settings
 logger = logging.getLogger("mezflow.realtime")
 
 
-class UUIDJsonEncoder(json.JSONEncoder):
+class MezFlowJsonEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, UUID):
             return str(obj)
+        if isinstance(obj, Decimal):
+            return float(obj)
         return super().default(obj)
 
 
@@ -52,7 +55,7 @@ class MenuConnectionManager:
             return
 
         dead_connections = set()
-        payload_str = json.dumps(message, cls=UUIDJsonEncoder)
+        payload_str = json.dumps(message, cls=MezFlowJsonEncoder)
 
         for ws in self._active_connections[restaurant_id]:
             try:
@@ -67,17 +70,87 @@ class MenuConnectionManager:
     async def publish_event(self, restaurant_id: UUID | str, event_data: dict):
         """Publishes event to Redis PubSub channel and dispatches locally."""
         rest_id_str = str(restaurant_id)
-        # 1. Local dispatch for immediate responsiveness (< 10ms)
         await self.broadcast_to_local(rest_id_str, event_data)
 
-        # 2. Redis pub/sub publish for multi-worker / cluster broadcast
         try:
             r = self.get_redis()
             channel = f"channel:menu:{rest_id_str}"
-            payload_str = json.dumps(event_data, cls=UUIDJsonEncoder)
+            payload_str = json.dumps(event_data, cls=MezFlowJsonEncoder)
             await r.publish(channel, payload_str)
         except Exception as e:
             logger.error(f"Failed to publish event to Redis: {e}")
 
 
+class SessionConnectionManager:
+    """Manages collaborative table sessions over WebSockets and Redis Pub/Sub."""
+
+    def __init__(self):
+        self._active_connections: Dict[str, Set[WebSocket]] = {}
+        self._redis_client: aioredis.Redis | None = None
+
+    def get_redis(self) -> aioredis.Redis:
+        if self._redis_client is None:
+            self._redis_client = aioredis.from_url(
+                settings.REDIS_URL,
+                decode_responses=True,
+            )
+        return self._redis_client
+
+    async def connect(self, session_id: str, websocket: WebSocket):
+        await websocket.accept()
+        if session_id not in self._active_connections:
+            self._active_connections[session_id] = set()
+        self._active_connections[session_id].add(websocket)
+        logger.info(f"WebSocket connected for table session {session_id}. Total: {len(self._active_connections[session_id])}")
+
+    def disconnect(self, session_id: str, websocket: WebSocket):
+        if session_id in self._active_connections:
+            self._active_connections[session_id].discard(websocket)
+            if not self._active_connections[session_id]:
+                del self._active_connections[session_id]
+        logger.info(f"WebSocket disconnected for table session {session_id}")
+
+    async def broadcast_to_local(self, session_id: str, message: dict):
+        if session_id not in self._active_connections:
+            return
+
+        dead_connections = set()
+        payload_str = json.dumps(message, cls=MezFlowJsonEncoder)
+
+        for ws in self._active_connections[session_id]:
+            try:
+                await ws.send_text(payload_str)
+            except Exception as e:
+                logger.warning(f"Error sending session update to websocket: {e}")
+                dead_connections.add(ws)
+
+        for ws in dead_connections:
+            self._active_connections[session_id].discard(ws)
+
+    async def publish_event(self, session_id: UUID | str, event_data: dict):
+        """Dispatches event locally and publishes to Redis PubSub for all session participants."""
+        sess_id_str = str(session_id)
+        await self.broadcast_to_local(sess_id_str, event_data)
+
+        try:
+            r = self.get_redis()
+            channel = f"channel:session:{sess_id_str}"
+            payload_str = json.dumps(event_data, cls=MezFlowJsonEncoder)
+            await r.publish(channel, payload_str)
+        except Exception as e:
+            logger.error(f"Failed to publish session event to Redis: {e}")
+
+    async def publish_kds_order(self, restaurant_id: UUID | str, order_data: dict):
+        """Dispatches order event to Kitchen Display System (M4 KDS bridge)."""
+        try:
+            r = self.get_redis()
+            channel = f"channel:kds:{str(restaurant_id)}"
+            payload_str = json.dumps(order_data, cls=MezFlowJsonEncoder)
+            await r.publish(channel, payload_str)
+            logger.info(f"Dispatched order to KDS channel {channel}")
+        except Exception as e:
+            logger.error(f"Failed to publish to KDS channel: {e}")
+
+
 menu_connection_manager = MenuConnectionManager()
+session_connection_manager = SessionConnectionManager()
