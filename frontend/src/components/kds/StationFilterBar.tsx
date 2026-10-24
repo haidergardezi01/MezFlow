@@ -13,6 +13,7 @@ import {
   ChefHat,
 } from "lucide-react";
 import { KitchenStation, KDSStatusFilter, KDSSummary } from "@/types/kds";
+import { SignOutButton } from "@/components/SignOutButton";
 
 interface StationFilterBarProps {
   selectedStation: KitchenStation;
@@ -156,6 +157,8 @@ export function StationFilterBar({
               </>
             )}
           </div>
+
+          <SignOutButton />
         </div>
       </div>
     </div>

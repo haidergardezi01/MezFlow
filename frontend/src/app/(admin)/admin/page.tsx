@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { SignOutButton } from "@/components/SignOutButton";
 import {
   ArrowLeft,
   LayoutDashboard,
@@ -89,13 +90,16 @@ export default function AdminDashboardPage() {
               Module 10 • Centralized configuration for menus, staff, tables, and settings.
             </p>
           </div>
-          <Link
-            href="/"
-            className="md:hidden inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-white"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>Home</span>
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link
+              href="/"
+              className="md:hidden inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-white"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>Home</span>
+            </Link>
+            <SignOutButton />
+          </div>
         </header>
 
         {/* Status Card Grid */}

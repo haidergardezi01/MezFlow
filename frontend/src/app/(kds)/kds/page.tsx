@@ -20,6 +20,8 @@ import {
   X,
 } from "lucide-react";
 
+const KDS_ROLES = ["kitchen_staff", "service_staff", "manager"];
+
 export default function KDSPage() {
   const { user, setAuth } = useAuthStore();
   const restaurantId = user?.restaurant_id || "52dc0556-c8c6-4131-be96-6643f9cc35b0"; // Fallback to seeded demo restaurant
@@ -49,8 +51,10 @@ export default function KDSPage() {
   // Ensure kitchen authentication for wall-mounted tablet or direct browser access
   useEffect(() => {
     async function ensureAuth() {
-      const token = typeof window !== "undefined" ? localStorage.getItem("mezflow_token") : null;
-      if (!token) {
+      // A customer or cashier token left in this browser gets 403 from /kds, so sign in as kitchen instead
+      const token = localStorage.getItem("mezflow_token");
+      const role = localStorage.getItem("mezflow_role");
+      if (!token || !KDS_ROLES.includes(role ?? "")) {
         try {
           const res = await apiClient.post("/auth/login", {
             username: "kitchen@mezflow.com",
