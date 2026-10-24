@@ -1,0 +1,15 @@
+# Old prototype monorepo and local notes (untracked, never deployed)
+/apps
+/packages
+/package.json
+/package-lock.json
+/docs
+/Docs
+*.md
+# Local build output and environments
+**/node_modules
+**/.next
+**/.venv
+**/__pycache__
+**/.pytest_cache
+.env
