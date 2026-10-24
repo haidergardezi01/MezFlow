@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import apiClient from "@/lib/api";
 import { useAuthStore } from "@/lib/authStore";
+import { wsBaseUrl } from "@/lib/endpoints";
 import { Order, OrderStatus } from "@/types/menu";
 import {
   ArrowLeft,
@@ -103,13 +104,7 @@ export default function OrderTrackingPage() {
     if (!order?.session_id || typeof window === "undefined") return;
 
     const sessionId = order.session_id;
-    const isHttps = window.location.protocol === "https:";
-    const defaultHost =
-      window.location.hostname === "localhost"
-        ? "localhost:8000"
-        : window.location.host;
-    const wsBase =
-      process.env.NEXT_PUBLIC_WS_URL || `${isHttps ? "wss" : "ws"}://${defaultHost}`;
+    const wsBase = wsBaseUrl();
 
     let ws: WebSocket | null = null;
     let pingInterval: NodeJS.Timeout | null = null;

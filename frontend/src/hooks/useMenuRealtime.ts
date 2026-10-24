@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { wsBaseUrl } from "@/lib/endpoints";
 
 export interface RealtimeMenuEvent {
   event: "ITEM_AVAILABILITY_CHANGED" | "MENU_ITEM_UPDATED" | "CATEGORY_UPDATED" | "CONNECTED";
@@ -26,14 +27,7 @@ export function useMenuRealtime(
   const connect = useCallback(() => {
     if (!restaurantId || typeof window === "undefined") return;
 
-    // Build WS URL
-    const isHttps = window.location.protocol === "https:";
-    const host =
-      window.location.hostname === "localhost"
-        ? "127.0.0.1"
-        : window.location.hostname;
-    const defaultHost = `${host}:8000`;
-    const wsBase = `${isHttps ? "wss" : "ws"}://${defaultHost}`;
+    const wsBase = wsBaseUrl();
     const wsUrl = `${wsBase}/ws/restaurants/${restaurantId}/menu`;
 
     try {

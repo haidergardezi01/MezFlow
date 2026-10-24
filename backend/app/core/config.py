@@ -1,4 +1,5 @@
 import os
+import re
 from typing import List, Union
 from pydantic import AnyHttpUrl, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -51,6 +52,14 @@ class Settings(BaseSettings):
                 "In production, SECRET_KEY must be a secure random key of at least 32 characters."
             )
         return v
+
+    @field_validator("DATABASE_URL", mode="after")
+    @classmethod
+    def use_asyncpg_driver(cls, v: str) -> str:
+        # Neon / Vercel Marketplace hand out postgres://...?sslmode=require&channel_binding=require; asyncpg needs its own scheme and ?ssl=
+        v = re.sub(r"^postgres(ql)?://", "postgresql+asyncpg://", v)
+        v = re.sub(r"[?&]channel_binding=[^&]*", "", v).replace("sslmode=", "ssl=")
+        return v if "?" in v or "&" not in v else v.replace("&", "?", 1)
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod

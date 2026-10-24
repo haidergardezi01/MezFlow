@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useCartStore } from "@/lib/cartStore";
+import { wsBaseUrl } from "@/lib/endpoints";
 
 export interface SessionRealtimeEvent {
   event:
@@ -135,13 +136,7 @@ export function useTableSession(
   const connect = useCallback(() => {
     if (!sessionId || typeof window === "undefined") return;
 
-    const isHttps = window.location.protocol === "https:";
-    const host =
-      window.location.hostname === "localhost"
-        ? "127.0.0.1"
-        : window.location.hostname;
-    const defaultHost = `${host}:8000`;
-    const wsBase = `${isHttps ? "wss" : "ws"}://${defaultHost}`;
+    const wsBase = wsBaseUrl();
 
     const queryParams = new URLSearchParams();
     if (dinerId) queryParams.set("diner_id", dinerId);

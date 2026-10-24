@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useKDSStore } from "@/lib/kdsStore";
+import { wsBaseUrl } from "@/lib/endpoints";
 
 export function useKDSSocket(restaurantId: string | undefined) {
   const [isConnected, setIsConnected] = useState(false);
@@ -15,13 +16,7 @@ export function useKDSSocket(restaurantId: string | undefined) {
   const connect = useCallback(() => {
     if (!restaurantId || typeof window === "undefined") return;
 
-    const isHttps = window.location.protocol === "https:";
-    const host =
-      window.location.hostname === "localhost"
-        ? "127.0.0.1"
-        : window.location.hostname;
-    const defaultHost = `${host}:8000`;
-    const wsBase = `${isHttps ? "wss" : "ws"}://${defaultHost}`;
+    const wsBase = wsBaseUrl();
 
     const wsUrl = `${wsBase}/ws/kds/${restaurantId}`;
 

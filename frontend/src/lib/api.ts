@@ -1,4 +1,5 @@
 import axios, { AxiosError, AxiosInstance, InternalAxiosRequestConfig } from "axios";
+import { apiBaseUrl } from "./endpoints";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
@@ -16,12 +17,7 @@ export const apiClient: AxiosInstance = axios.create({
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     if (typeof window !== "undefined") {
-      // Automatically target backend on the same host (supports mobile Wi-Fi testing)
-      const host =
-        window.location.hostname === "localhost"
-          ? "127.0.0.1"
-          : window.location.hostname;
-      config.baseURL = `http://${host}:8000/api/v1`;
+      config.baseURL = apiBaseUrl();
 
       const token = localStorage.getItem("mezflow_token");
       if (token && config.headers) {
