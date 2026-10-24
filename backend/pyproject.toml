@@ -1,3 +1,26 @@
+# Vercel installs the backend from [project].dependencies (it skips requirements.txt when pyproject.toml exists).
+# Keep in sync with requirements.txt, which Docker and CI still use.
+[project]
+name = "mezflow-backend"
+version = "1.0.0"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "pydantic>=2.8.0",
+    "pydantic-settings>=2.4.0",
+    "email-validator>=2.0.0",
+    "sqlalchemy[asyncio]>=2.0.32",
+    "asyncpg>=0.29.0",
+    "alembic>=1.13.2",
+    "passlib[bcrypt]>=1.7.4",
+    "bcrypt>=4.0.1",
+    "python-jose[cryptography]>=3.3.0",
+    "python-multipart>=0.0.9",
+    "redis>=5.0.8",
+    "qrcode[pil]>=8.0",
+]
+
 [tool.pytest.ini_options]
 minversion = "7.0"
 addopts = "-ra -q"
