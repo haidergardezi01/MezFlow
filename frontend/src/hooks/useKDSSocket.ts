@@ -16,7 +16,11 @@ export function useKDSSocket(restaurantId: string | undefined) {
     if (!restaurantId || typeof window === "undefined") return;
 
     const isHttps = window.location.protocol === "https:";
-    const defaultHost = `${window.location.hostname}:8000`;
+    const host =
+      window.location.hostname === "localhost"
+        ? "127.0.0.1"
+        : window.location.hostname;
+    const defaultHost = `${host}:8000`;
     const wsBase = `${isHttps ? "wss" : "ws"}://${defaultHost}`;
 
     const wsUrl = `${wsBase}/ws/kds/${restaurantId}`;

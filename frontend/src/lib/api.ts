@@ -17,7 +17,11 @@ apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     if (typeof window !== "undefined") {
       // Automatically target backend on the same host (supports mobile Wi-Fi testing)
-      config.baseURL = `http://${window.location.hostname}:8000/api/v1`;
+      const host =
+        window.location.hostname === "localhost"
+          ? "127.0.0.1"
+          : window.location.hostname;
+      config.baseURL = `http://${host}:8000/api/v1`;
 
       const token = localStorage.getItem("mezflow_token");
       if (token && config.headers) {

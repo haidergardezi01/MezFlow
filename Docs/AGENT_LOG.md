@@ -422,6 +422,18 @@ This document serves as the authoritative, persistent operational log of all int
   - GitHub Actions Workflow Run `39805451333` ran both `backend-test` (Alembic migrations, database seeding, 40 pytest tests) and `frontend-check` (TypeScript strict check).
   - **Result: `conclusion: success` (100% GREEN CHECKMARK ✅)**.
 
+
+#### Entry 1.20: Resolving Login Timeout (10000ms), Localhost IPv6 Connection Refusal & Generating PWA Icons
+- **User Prompt:** *User showed screenshot of login screen showing "timeout of 10000ms exceeded" and console errors for missing `icon-192.png` (404) and `ERR_CONNECTION_REFUSED`, asking "Analyze it and fix this issues and run it".*
+- **Root Cause Analysis:**
+  - **Connection Refused & 10000ms Timeout:** When uvicorn was started without `--host 0.0.0.0` (`uvicorn app.main:app --reload --port 8000`), it bound strictly to IPv4 `127.0.0.1`. When modern browsers access `http://localhost:3001` and call `localhost:8000`, the browser resolves `localhost` to IPv6 `::1` first. Since port 8000 had no IPv6 listener, the connection was refused or hung until Axios timed out after 10000ms.
+  - **Missing PWA Icons:** `manifest.json` referenced `/icon-192.png` and `/icon-512.png`, but neither file existed in `frontend/public/`, resulting in repeated 404 errors in the DevTools console.
+- **Actions Taken:**
+  - **Mapped `localhost` to `127.0.0.1` in Frontend:** Updated `frontend/src/lib/api.ts`, `useMenuRealtime.ts`, `useTableSession.ts`, and `useKDSSocket.ts` so that when browsing on `localhost`, connections explicitly target IPv4 `127.0.0.1:8000`, preventing IPv6 `::1` connection drops on Windows.
+  - **Added Default Runner & Main Block:** Added `if __name__ == "__main__": uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)` to `backend/app/main.py` and created `backend/run.py` so running Python automatically binds to all interfaces (`0.0.0.0:8000`).
+  - **Generated Missing PWA Assets:** Created branded MezFlow icons `frontend/public/icon-192.png`, `frontend/public/icon-512.png`, and `frontend/public/favicon.ico`. 404 manifest errors eliminated.
+  - **Verification:** Verified `POST /auth/login` and root health endpoints return 200 OK without delay. TypeScript compilation verified with 0 errors.
+
 ---
 
 ## 4. Current Repository State Summary
@@ -455,6 +467,7 @@ This document serves as the authoritative, persistent operational log of all int
 3. [x] Fix React hook order in SharedCartDrawer and purge test orders from database.
 4. [x] Resolve port 8000 Docker collision and add KDS direct auto-auth.
 5. [x] Fix GitHub Actions CI test database seeding so CI pipeline builds green.
-6. [ ] Initiate planning for **Module 5: Order Lifecycle & Real-Time Sync** (FYP-II milestone or edge reconnection & reconciliation).
+6. [x] Resolve login timeout, map localhost to 127.0.0.1, and generate PWA manifest icons.
+7. [ ] Initiate planning for **Module 5: Order Lifecycle & Real-Time Sync** (FYP-II milestone or edge reconnection & reconciliation).
 
 
