@@ -24,6 +24,7 @@ interface KDSState {
   statusFilter: KDSStatusFilter;
   soundEnabled: boolean;
   isLoading: boolean;
+  hasLoaded: boolean;
   recallToast: RecallToast | null;
   error: string | null;
 
@@ -55,6 +56,7 @@ export const useKDSStore = create<KDSState>((set, get) => ({
   statusFilter: "ALL",
   soundEnabled: audioAlerts.isEnabled(),
   isLoading: false,
+  hasLoaded: false,
   recallToast: null,
   error: null,
 
@@ -79,14 +81,15 @@ export const useKDSStore = create<KDSState>((set, get) => ({
   fetchActiveOrders: async () => {
     const { selectedStation, statusFilter } = get();
     try {
-      set({ isLoading: true, error: null });
+      // Spinner only for the very first load; later refreshes swap data in silently
+      set({ isLoading: !get().hasLoaded, error: null });
       const res = await apiClient.get<KDSOrderCard[]>("/kds/orders/active", {
         params: {
           station: selectedStation,
           status: statusFilter.toLowerCase(),
         },
       });
-      set({ orders: res.data, isLoading: false });
+      set({ orders: res.data, isLoading: false, hasLoaded: true });
     } catch (err: any) {
       set({
         isLoading: false,

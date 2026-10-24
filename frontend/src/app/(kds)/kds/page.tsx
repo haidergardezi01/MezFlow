@@ -84,7 +84,7 @@ export default function KDSPage() {
     ensureAuth();
   }, [setAuth, fetchActiveOrders, fetchSummary]);
 
-  // Initial fetch & polling fallback (every 30s)
+  // Initial fetch + silent background refresh (every 5s) in case a live event is missed
   useEffect(() => {
     fetchActiveOrders();
     fetchSummary();
@@ -92,7 +92,7 @@ export default function KDSPage() {
     const interval = setInterval(() => {
       fetchActiveOrders();
       fetchSummary();
-    }, 30000);
+    }, 5000);
 
     return () => clearInterval(interval);
   }, [fetchActiveOrders, fetchSummary]);
