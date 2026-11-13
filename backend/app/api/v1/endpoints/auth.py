@@ -608,7 +608,7 @@ async def forgot_password(
         "success": True,
         "message": f"Verification code generated and printed to terminal for '{clean_email}'.",
         "email": clean_email,
-        "debug_code": code if settings.ENVIRONMENT == "development" else None,
+        "debug_code": code if settings.ENVIRONMENT in ("development", "test") else None,
     }
 
 
