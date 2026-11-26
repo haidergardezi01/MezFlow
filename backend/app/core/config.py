@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     CLERK_JWKS_URL: Optional[str] = None
     CLERK_ISSUER: Optional[str] = None
 
+    # Login lockout and password reset
+    MAX_FAILED_LOGINS: int = 5
+    LOCKOUT_MINUTES: int = 15
+    PASSWORD_RESET_EXPIRE_MINUTES: int = 15
+    PASSWORD_RESET_MAX_ATTEMPTS: int = 5
+
     # Sign-up e-mail verification code
     SIGNUP_CODE_EXPIRE_MINUTES: int = 15
     SIGNUP_CODE_MAX_ATTEMPTS: int = 5
@@ -33,6 +39,7 @@ class Settings(BaseSettings):
     SMTP_USER: Optional[str] = None
     SMTP_PASSWORD: Optional[str] = None
     SMTP_FROM: Optional[str] = None
+    SMTP_FROM_NAME: str = "MezFlow"
 
     # PostgreSQL Database
     POSTGRES_SERVER: str = "localhost"
@@ -52,6 +59,12 @@ class Settings(BaseSettings):
         "http://localhost:3001",
         "http://127.0.0.1:3001",
     ]
+
+    @field_validator("SMTP_PASSWORD", mode="after")
+    @classmethod
+    def strip_app_password_spaces(cls, v: Optional[str]) -> Optional[str]:
+        # Google shows App Passwords as "abcd efgh ijkl mnop"; people paste them with the spaces
+        return v.replace(" ", "") if v else v
 
     @field_validator("DEBUG", mode="after")
     @classmethod

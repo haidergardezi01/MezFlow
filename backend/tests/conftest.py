@@ -148,3 +148,10 @@ async def cleanup_test_orders_teardown():
         await session.execute(delete(Diner))
         await session.execute(delete(TableSession))
         await session.commit()
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limits():
+    """Every test starts with a clean rate-limit window (all test requests share one client IP)."""
+    from app.services import rate_limit
+    rate_limit.reset()

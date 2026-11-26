@@ -42,6 +42,7 @@ export default function SignUpPage() {
   const [managerName, setManagerName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [currency, setCurrency] = useState("PKR");
   const [phone, setPhone] = useState("");
@@ -185,6 +186,15 @@ export default function SignUpPage() {
         isUrdu
           ? "پاس ورڈ کم از کم 8 حروف پر مشتمل ہونا چاہیے۔"
           : "Password must be at least 8 characters long."
+      );
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError(
+        isUrdu
+          ? "دونوں پاس ورڈ ایک جیسے نہیں ہیں۔"
+          : "Passwords do not match. Please type the same password twice."
       );
       return;
     }
@@ -488,6 +498,7 @@ export default function SignUpPage() {
                     type={showPassword ? "text" : "password"}
                     required
                     minLength={8}
+                    autoComplete="new-password"
                     placeholder="••••••••••••"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
@@ -501,6 +512,25 @@ export default function SignUpPage() {
                   >
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
+                </div>
+              </div>
+
+              {/* Confirm Password */}
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1.5">
+                  {isUrdu ? "پاس ورڈ دوبارہ لکھیں *" : "Confirm Password *"}
+                </label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    required
+                    autoComplete="new-password"
+                    placeholder="••••••••••••"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="w-full bg-surface-dark border border-surface-border rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-all"
+                  />
                 </div>
               </div>
 

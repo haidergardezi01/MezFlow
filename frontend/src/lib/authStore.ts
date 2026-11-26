@@ -36,6 +36,30 @@ interface AuthState {
   logout: () => void;
 }
 
+// "Remember this device" unticked: the login lives only until the browser is closed.
+// sessionStorage dies with the browser, so a session-only login without its marker is a stale one.
+if (typeof window !== "undefined") {
+  try {
+    if (localStorage.getItem("mezflow_session_only") === "1" && !sessionStorage.getItem("mezflow_alive")) {
+      ["mezflow_token", "mezflow_role", "mezflow_restaurant_id", "mezflow_session_only"].forEach((k) =>
+        localStorage.removeItem(k)
+      );
+    }
+  } catch {
+    // storage blocked (private mode): nothing to clean up
+  }
+}
+
+export function rememberThisDevice(remember: boolean) {
+  if (typeof window === "undefined") return;
+  if (remember) {
+    localStorage.removeItem("mezflow_session_only");
+  } else {
+    localStorage.setItem("mezflow_session_only", "1");
+    sessionStorage.setItem("mezflow_alive", "1");
+  }
+}
+
 export const useAuthStore = create<AuthState>((set) => ({
   token: typeof window !== "undefined" ? localStorage.getItem("mezflow_token") : null,
   user: null,
@@ -72,6 +96,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       localStorage.removeItem("mezflow_token");
       localStorage.removeItem("mezflow_role");
       localStorage.removeItem("mezflow_restaurant_id");
+      localStorage.removeItem("mezflow_session_only");
     }
     set({
       token: null,

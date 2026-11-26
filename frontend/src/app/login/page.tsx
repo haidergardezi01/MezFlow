@@ -15,12 +15,11 @@ import {
   EyeOff,
   Building2,
   KeyRound,
-  Terminal,
   Check,
   X,
 } from "lucide-react";
 import { LanguageToggle } from "@/components/LanguageToggle";
-import { useAuthStore } from "@/lib/authStore";
+import { useAuthStore, rememberThisDevice } from "@/lib/authStore";
 import apiClient, { warmupBackend } from "@/lib/api";
 
 export default function LoginPage() {
@@ -120,6 +119,7 @@ export default function LoginPage() {
       });
 
       const data = res.data;
+      rememberThisDevice(rememberMe);
       setAuth(data.access_token, {
         id: data.user_id,
         restaurant_id: data.restaurant_id,
@@ -157,7 +157,10 @@ export default function LoginPage() {
       );
 
       setTimeout(() => {
-        handleRoleRedirect(data.role);
+        // Back to the page that sent them here (e.g. /kds), same-site paths only
+        const next = new URLSearchParams(window.location.search).get("next");
+        if (next && next.startsWith("/") && !next.startsWith("//")) router.push(next);
+        else handleRoleRedirect(data.role);
       }, 700);
     } catch (err: any) {
       setError(
@@ -192,8 +195,8 @@ export default function LoginPage() {
       setForgotStep("code");
       setForgotSuccess(
         isUrdu
-          ? "او ٹی پی کوڈ بیک اینڈ ٹرمینل میں پرنٹ کر دیا گیا ہے!"
-          : "6-digit OTP code has been generated and printed in your backend terminal!"
+          ? "اگر یہ ای میل رجسٹرڈ ہے تو اس پر 6 ہندسوں کا کوڈ بھیج دیا گیا ہے۔"
+          : "If an account uses this email, we've sent a 6-digit code to it. Check your inbox (and spam)."
       );
     } catch (err: any) {
       setForgotError(err.message || "Failed to send reset code. Please verify the email exists.");
@@ -208,8 +211,8 @@ export default function LoginPage() {
       setForgotError(isUrdu ? "براہ کرم 6 ہندسوں کا درست کوڈ درج کریں۔" : "Please enter the valid 6-digit code.");
       return;
     }
-    if (forgotNewPassword.length < 6) {
-      setForgotError(isUrdu ? "پاس ورڈ کم از کم 6 حروف کا ہونا چاہیے۔" : "Password must be at least 6 characters.");
+    if (forgotNewPassword.length < 8) {
+      setForgotError(isUrdu ? "پاس ورڈ کم از کم 8 حروف کا ہونا چاہیے۔" : "Password must be at least 8 characters.");
       return;
     }
     if (forgotNewPassword !== forgotConfirmPassword) {
@@ -506,8 +509,8 @@ export default function LoginPage() {
                         ? "مرحلہ 1: اپنا رجسٹرڈ ای میل درج کریں"
                         : "Step 1 of 2: Enter registered business email"
                       : isUrdu
-                      ? "مرحلہ 2: ٹرمینل کوڈ اور نیا پاس ورڈ درج کریں"
-                      : "Step 2 of 2: Enter terminal OTP & new password"}
+                      ? "مرحلہ 2: ای میل کا کوڈ اور نیا پاس ورڈ درج کریں"
+                      : "Step 2 of 2: Enter the emailed code & new password"}
                   </span>
                 </div>
               </div>
@@ -521,12 +524,14 @@ export default function LoginPage() {
               </button>
             </div>
 
-            {/* Terminal Notice */}
+            {/* Email delivery notice */}
             <div className="mb-4 p-3 rounded-2xl bg-brand-500/10 border border-brand-500/20 text-brand-300 text-xs flex items-start gap-2.5">
-              <Terminal className="w-4 h-4 shrink-0 text-brand-400 mt-0.5" />
+              <Mail className="w-4 h-4 shrink-0 text-brand-400 mt-0.5" />
               <div className="text-[11px] leading-relaxed">
-                <span className="font-bold text-white block mb-0.5">Terminal OTP Delivery:</span>
-                Your 6-digit verification code will be printed directly in your backend terminal console!
+                <span className="font-bold text-white block mb-0.5">{isUrdu ? "ای میل کوڈ" : "Code by email"}</span>
+                {isUrdu
+                  ? "ہم آپ کی ای میل پر 6 ہندسوں کا کوڈ بھیجیں گے، جو 15 منٹ تک چلے گا۔"
+                  : "We'll email you a 6-digit code. It works for 15 minutes."}
               </div>
             </div>
 
@@ -593,7 +598,7 @@ export default function LoginPage() {
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="block text-xs font-medium text-slate-300">
-                      {isUrdu ? "6 ہندسوں کا کوڈ (ٹرمینل چیک کریں) *" : "6-Digit Code (Check Terminal) *"}
+                      {isUrdu ? "6 ہندسوں کا کوڈ (ای میل دیکھیں) *" : "6-Digit Code (check your email) *"}
                     </label>
                     <button
                       type="button"
@@ -616,7 +621,7 @@ export default function LoginPage() {
 
                 <div>
                   <label className="block text-xs font-medium text-slate-300 mb-1">
-                    {isUrdu ? "نیا پاس ورڈ (کم از کم 6 حروف) *" : "New Password (min 6 chars) *"}
+                    {isUrdu ? "نیا پاس ورڈ (کم از کم 8 حروف) *" : "New Password (min 8 chars) *"}
                   </label>
                   <div className="relative">
                     <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />

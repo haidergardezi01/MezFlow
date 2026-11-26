@@ -61,6 +61,10 @@ export default function AdminDashboardPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [togglingItemId, setTogglingItemId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [passwordFor, setPasswordFor] = useState<string | null>(null);
+  const [staffNewPassword, setStaffNewPassword] = useState("");
+  const [staffPasswordError, setStaffPasswordError] = useState<string | null>(null);
+  const [savingStaffPassword, setSavingStaffPassword] = useState(false);
 
   // Active Category filter in Menu tab
   const [selectedMenuCategory, setSelectedMenuCategory] = useState<string>("all");
@@ -196,6 +200,27 @@ export default function AdminDashboardPage() {
       alert(err.message || "Failed to create staff member.");
     } finally {
       setSubmittingStaff(false);
+    }
+  };
+
+  // Manager sets a staff member's login password (starter accounts start with a random one)
+  const handleSetStaffPassword = async (memberId: string) => {
+    if (staffNewPassword.length < 8) {
+      setStaffPasswordError("Password must be at least 8 characters.");
+      return;
+    }
+    setSavingStaffPassword(true);
+    setStaffPasswordError(null);
+    try {
+      await apiClient.patch(`/auth/staff/${memberId}/password`, { password: staffNewPassword });
+      setPasswordFor(null);
+      setStaffNewPassword("");
+      setToastMessage("Password updated. Share it with your staff member.");
+      setTimeout(() => setToastMessage(null), 3000);
+    } catch (err: any) {
+      setStaffPasswordError(err.message || "Could not update password.");
+    } finally {
+      setSavingStaffPassword(false);
     }
   };
 
@@ -1328,12 +1353,53 @@ export default function AdminDashboardPage() {
                             <ExternalLink className="w-3 h-3" />
                           </Link>
                         )}
-                        {member.role === "manager" && (
+                        {member.role === "manager" ? (
                           <span className="text-[10px] text-brand-400 font-bold">
                             Current Session
                           </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPasswordFor(passwordFor === member.id ? null : member.id);
+                              setStaffNewPassword("");
+                              setStaffPasswordError(null);
+                            }}
+                            className="text-[11px] font-bold text-slate-300 hover:text-white"
+                          >
+                            Set password
+                          </button>
                         )}
                       </div>
+
+                      {passwordFor === member.id && (
+                        <div className="mt-3 space-y-2">
+                          <div className="flex gap-2">
+                            <input
+                              type="password"
+                              autoComplete="new-password"
+                              placeholder="New password (min 8)"
+                              value={staffNewPassword}
+                              onChange={(e) => {
+                                setStaffNewPassword(e.target.value);
+                                setStaffPasswordError(null);
+                              }}
+                              className="flex-1 min-w-0 bg-surface-dark border border-surface-border rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-brand-500"
+                            />
+                            <button
+                              type="button"
+                              disabled={savingStaffPassword}
+                              onClick={() => handleSetStaffPassword(member.id)}
+                              className="bg-brand-500 hover:bg-brand-600 disabled:opacity-50 text-white text-[11px] font-bold px-3 rounded-lg"
+                            >
+                              {savingStaffPassword ? "Saving..." : "Save"}
+                            </button>
+                          </div>
+                          {staffPasswordError && (
+                            <p className="text-[11px] text-rose-300">{staffPasswordError}</p>
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })}

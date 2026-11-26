@@ -109,6 +109,10 @@ class SignupVerifyRequest(BaseModel):
     code: str = Field(..., pattern=r"^\d{6}$")
 
 
+class StaffPasswordRequest(BaseModel):
+    password: str = Field(..., min_length=8, max_length=72)
+
+
 class ClerkRegisterRequest(BaseModel):
     """Optional workspace details for a Google sign-up; identity comes from the Clerk token."""
     restaurant_name: Optional[str] = Field(None, min_length=2, max_length=255)
@@ -133,4 +137,4 @@ class ForgotPasswordRequest(BaseModel):
 class ResetPasswordRequest(BaseModel):
     email: EmailStr = Field(..., description="Registered account email")
     code: str = Field(..., min_length=6, max_length=6, pattern="^[0-9]{6}$", description="6-digit OTP code")
-    new_password: str = Field(..., min_length=6, description="New password (minimum 6 characters)")
+    new_password: str = Field(..., min_length=8, max_length=72, description="New password (minimum 8 characters, same rule as sign-up)")

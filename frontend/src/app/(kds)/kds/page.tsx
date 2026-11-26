@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
-import apiClient from "@/lib/api";
+import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/authStore";
 import { useKDSStore } from "@/lib/kdsStore";
 import { useKDSSocket } from "@/hooks/useKDSSocket";
@@ -21,8 +21,13 @@ import {
 } from "lucide-react";
 
 export default function KDSPage() {
-  const { user, setAuth } = useAuthStore();
-  const restaurantId = user?.restaurant_id || "52dc0556-c8c6-4131-be96-6643f9cc35b0"; // Fallback to seeded demo restaurant
+  const router = useRouter();
+  const { user } = useAuthStore();
+  // The store has no user after a reload, so fall back to the restaurant saved at login (never another tenant's demo id)
+  const restaurantId =
+    user?.restaurant_id ||
+    (typeof window !== "undefined" ? localStorage.getItem("mezflow_restaurant_id") : null) ||
+    undefined;
 
   const {
     orders,
@@ -46,39 +51,14 @@ export default function KDSPage() {
 
   const { isConnected, isPolling, reconnect } = useKDSSocket(restaurantId);
 
-  // Ensure kitchen authentication for wall-mounted tablet or direct browser access
+  // Kitchen screen needs a kitchen/service/manager login; no password lives in this page any more
   useEffect(() => {
-    async function ensureAuth() {
-      const token = typeof window !== "undefined" ? localStorage.getItem("mezflow_token") : null;
-      if (!token) {
-        try {
-          const res = await apiClient.post("/auth/login", {
-            username: "kitchen@mezflow.com",
-            password: "kitchen123",
-          });
-          const { access_token, user_id, restaurant_id, role, display_name, preferred_language } = res.data;
-          setAuth(access_token, {
-            id: user_id,
-            restaurant_id,
-            role,
-            is_active: true,
-            is_verified: true,
-            profile: {
-              id: user_id,
-              display_name: display_name || "Kitchen Chef",
-              preferred_language: preferred_language || "en",
-              push_notifications_enabled: false,
-            },
-          });
-          fetchActiveOrders();
-          fetchSummary();
-        } catch (e) {
-          console.error("Failed to auto-authenticate kitchen staff:", e);
-        }
-      }
+    const token = localStorage.getItem("mezflow_token");
+    const role = localStorage.getItem("mezflow_role");
+    if (!token || !["kitchen_staff", "service_staff", "manager"].includes(role ?? "")) {
+      router.replace("/login?next=/kds");
     }
-    ensureAuth();
-  }, [setAuth, fetchActiveOrders, fetchSummary]);
+  }, [router]);
 
   // Initial fetch on mount (continuous fast auto-sync is handled by useKDSSocket)
   useEffect(() => {

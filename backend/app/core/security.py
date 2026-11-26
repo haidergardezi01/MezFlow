@@ -15,6 +15,14 @@ def get_password_hash(password: str) -> str:
     return bcrypt.hashpw(password_bytes, salt).decode("utf-8")
 
 
+# Checked when the account is unknown, so a miss costs the same bcrypt time as a wrong password.
+_DUMMY_HASH = bcrypt.hashpw(b"timing-equaliser", bcrypt.gensalt(rounds=12)).decode("utf-8")
+
+
+def burn_password_check(password: str) -> None:
+    verify_password(password, _DUMMY_HASH)
+
+
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verifies a plaintext password against a stored bcrypt hash."""
     try:

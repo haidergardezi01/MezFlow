@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, ForeignKey, Enum as SQLEnum, UniqueConstraint
+from sqlalchemy import Column, String, Boolean, Integer, DateTime, ForeignKey, Enum as SQLEnum, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 import enum
@@ -24,6 +24,10 @@ class User(BaseModel):
     role = Column(SQLEnum(UserRole), default=UserRole.CUSTOMER, nullable=False, index=True)
     is_active = Column(Boolean, default=True, nullable=False)
     is_verified = Column(Boolean, default=False, nullable=False)
+
+    # Brute-force lockout
+    failed_login_attempts = Column(Integer, default=0, server_default="0", nullable=False)
+    locked_until = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("restaurant_id", "email", name="uq_users_restaurant_email"),

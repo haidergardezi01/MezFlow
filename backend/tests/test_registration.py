@@ -18,8 +18,8 @@ API = "/api/v1/auth"
 def outbox(monkeypatch):
     sent = []
 
-    async def fake_send(to, subject, body):
-        sent.append({"to": to, "subject": subject, "body": body})
+    async def fake_send(to, subject, body, html=None):
+        sent.append({"to": to, "subject": subject, "body": body, "html": html})
 
     monkeypatch.setattr(notify, "send_email", fake_send)
     return sent

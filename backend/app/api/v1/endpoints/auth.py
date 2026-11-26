@@ -1,10 +1,11 @@
+import os
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_, desc, func
+from sqlalchemy import select, or_, desc, func, update
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import (
@@ -17,10 +18,10 @@ from app.api.deps import (
     fetch_clerk_verified_email,
 )
 from app.core.config import settings
-from app.core.security import get_password_hash, verify_password, create_access_token, hash_signup_code
+from app.core.security import burn_password_check, get_password_hash, verify_password, create_access_token, hash_signup_code
 from app.models.user import User, UserProfile, UserRole
 from app.models.audit import AuditLog
-from app.models.pending_registration import PendingRegistration
+from app.models.pending_registration import PasswordResetCode, PendingRegistration
 from app.models.restaurant import Restaurant
 import re
 import secrets
@@ -40,11 +41,12 @@ from app.schemas.auth import (
     RestaurantRegisterRequest,
     ClerkRegisterRequest,
     SignupVerifyRequest,
+    StaffPasswordRequest,
     OnboardingRequest,
     ForgotPasswordRequest,
     ResetPasswordRequest,
 )
-from app.services import notify
+from app.services import notify, rate_limit
 from app.services.otp import OTPService
 from app.services.audit import record_audit_log
 
@@ -52,9 +54,12 @@ router = APIRouter()
 
 
 def _get_client_ip(request: Request) -> Optional[str]:
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    # Vercel overwrites X-Forwarded-For with the real client IP; anywhere else the client controls it,
+    # so trusting it there would let anyone dodge the rate limits by changing the header.
+    if os.environ.get("VERCEL"):
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
     return request.client.host if request.client else None
 
 
@@ -68,6 +73,7 @@ async def signup(
     Registers a new user (Customer or Staff) under a restaurant.
     (FR-M1-01, FR-M1-05)
     """
+    rate_limit.check(f"signup:{_get_client_ip(request)}", limit=10)
     # 1. Verify restaurant exists
     rest_res = await db.execute(select(Restaurant).where(Restaurant.id == data.restaurant_id))
     if not rest_res.scalar_one_or_none():
@@ -261,6 +267,36 @@ async def list_staff(
     return res.scalars().all()
 
 
+@router.patch("/staff/{staff_id}/password", tags=["Administration"])
+async def set_staff_password(
+    staff_id: UUID,
+    data: StaffPasswordRequest,
+    request: Request,
+    current_user: User = Depends(require_roles([UserRole.MANAGER])),
+    db: AsyncSession = Depends(get_db),
+):
+    """Manager sets a staff member's login password (own restaurant only). Also clears any lockout."""
+    staff = (await db.execute(
+        select(User).where(User.id == staff_id, User.restaurant_id == current_user.restaurant_id)
+    )).scalar_one_or_none()
+    if not staff or staff.role == UserRole.CUSTOMER:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff member not found.")
+    staff.hashed_password = get_password_hash(data.password)
+    staff.failed_login_attempts = 0
+    staff.locked_until = None
+    await record_audit_log(
+        db=db,
+        restaurant_id=current_user.restaurant_id,
+        user_id=current_user.id,
+        action="STAFF_PASSWORD_SET",
+        resource_type="user",
+        resource_id=str(staff.id),
+        ip_address=_get_client_ip(request),
+    )
+    await db.commit()
+    return {"success": True, "message": "Password updated."}
+
+
 @router.post("/staff/seed-starter-team", response_model=List[UserResponse], tags=["Administration"])
 async def seed_starter_team(
     current_user: User = Depends(require_roles([UserRole.MANAGER])),
@@ -331,67 +367,81 @@ async def login(
     (FR-M1-01, FR-M1-02, FR-M1-05)
     """
     clean_username = data.username.strip()
+    ip = _get_client_ip(request)
+    rate_limit.check(f"login:{ip}", limit=30)
 
+    where = [or_(func.lower(User.email) == clean_username.lower(), User.phone_number == clean_username)]
     if data.restaurant_id:
-        stmt = (
-            select(User)
-            .options(selectinload(User.profile))
-            .where(
-                User.restaurant_id == data.restaurant_id,
-                or_(
-                    func.lower(User.email) == clean_username.lower(),
-                    User.phone_number == clean_username,
-                ),
-            )
-        )
-        res = await db.execute(stmt)
-        user = res.scalar_one_or_none()
-    else:
-        stmt = (
-            select(User)
-            .options(selectinload(User.profile))
-            .where(
-                or_(
-                    func.lower(User.email) == clean_username.lower(),
-                    User.phone_number == clean_username,
-                ),
-            )
-        )
-        res = await db.execute(stmt)
-        users = res.scalars().all()
-        if len(users) > 1:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Multiple restaurant accounts match this username. Please specify restaurant_id.",
-            )
-        user = users[0] if users else None
+        where.append(User.restaurant_id == data.restaurant_id)
+    candidates = (await db.execute(select(User).options(selectinload(User.profile)).where(*where))).scalars().all()
 
-    if not user:
+    invalid = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Email or password is incorrect. Please check both and try again.",
+    )
+    now = datetime.now(timezone.utc)
+    with_password = [u for u in candidates if u.hashed_password]
+    if not with_password:
+        # Unknown e-mail costs the same bcrypt time as a wrong password, so timing does not reveal accounts
+        burn_password_check(data.password)
+        raise invalid
+
+    locked = [u for u in with_password if u.locked_until and u.locked_until > now]
+    if len(locked) == len(with_password):
+        minutes = int((min(u.locked_until for u in locked) - now).total_seconds() // 60) + 1
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Email or password is incorrect. Please check both and try again.",
+            status_code=status.HTTP_423_LOCKED,
+            detail=f"Too many wrong passwords. Your account is locked for {minutes} more minute(s). Try again later or use Forgot password.",
         )
 
-    if not user.hashed_password:
+    # One e-mail can exist in several restaurants: the password decides which account this is
+    matches = [u for u in with_password if u not in locked and verify_password(data.password, u.hashed_password)]
+    if not matches:
+        for u in with_password:
+            if u in locked:
+                continue
+            u.failed_login_attempts = (u.failed_login_attempts or 0) + 1
+            if u.failed_login_attempts >= settings.MAX_FAILED_LOGINS:
+                u.locked_until = now + timedelta(minutes=settings.LOCKOUT_MINUTES)
+                u.failed_login_attempts = 0
+                await record_audit_log(
+                    db=db,
+                    restaurant_id=u.restaurant_id,
+                    user_id=u.id,
+                    action="USER_LOCKED",
+                    resource_type="session",
+                    resource_id=str(u.id),
+                    ip_address=ip,
+                )
+        await db.commit()  # get_db rolls back on exceptions and the counter must stick
+        if any(u.locked_until and u.locked_until > now for u in with_password):
+            raise HTTPException(
+                status_code=status.HTTP_423_LOCKED,
+                detail=f"Too many wrong passwords. Your account is locked for {settings.LOCKOUT_MINUTES} minutes. Try again later or use Forgot password.",
+            )
+        left = min(settings.MAX_FAILED_LOGINS - (u.failed_login_attempts or 0) for u in with_password if u not in locked)
+        if left <= 2:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Email or password is incorrect. {left} attempt(s) left before your account is locked for {settings.LOCKOUT_MINUTES} minutes.",
+            )
+        raise invalid
+    if len(matches) > 1:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="This account was registered via OTP and does not have a password set. Please use OTP login.",
+            detail="This email and password match more than one restaurant. Please contact support.",
         )
-
-    if not verify_password(data.password, user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Email or password is incorrect. Please check both and try again.",
-        )
+    user = matches[0]
 
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is deactivated.",
         )
+    user.failed_login_attempts = 0
+    user.locked_until = None
 
     # Record Audit Log
-    ip = _get_client_ip(request)
     await record_audit_log(
         db=db,
         restaurant_id=user.restaurant_id,
@@ -424,11 +474,12 @@ async def login(
 
 
 @router.post("/request-otp", tags=["Authentication"])
-async def request_otp(data: OTPRequest):
+async def request_otp(data: OTPRequest, request: Request):
     """
     Requests a 6-digit one-time password sent to phone or email.
     (FR-M1-01)
     """
+    rate_limit.check(f"otp-request:{_get_client_ip(request)}", limit=5)
     clean_destination = data.destination.strip().lower()
     code = await OTPService.request_otp(clean_destination)
     return {
@@ -450,6 +501,7 @@ async def verify_otp(
     Creates account automatically if it does not yet exist.
     (FR-M1-01, FR-M1-02)
     """
+    rate_limit.check(f"otp-verify:{_get_client_ip(request)}", limit=20)
     is_valid, error_msg = await OTPService.verify_otp(data.destination, data.code)
     if not is_valid:
         raise HTTPException(
@@ -581,131 +633,144 @@ async def verify_otp(
     )
 
 
+GENERIC_RESET_SENT = "If an account uses this email, we have sent a 6-digit code to it."
+
+
+async def _password_users(db: AsyncSession, email: str) -> List[User]:
+    """Active accounts with a password for this e-mail (one per restaurant)."""
+    res = await db.execute(
+        select(User)
+        .options(selectinload(User.profile))
+        .where(func.lower(User.email) == email, User.is_active.is_(True), User.hashed_password.is_not(None))
+    )
+    return list(res.scalars().all())
+
+
 @router.post(
     "/forgot-password",
     tags=["Authentication"],
-    summary="Request a password reset OTP code (prints directly to terminal)",
+    summary="E-mail a 6-digit password reset code",
 )
 async def forgot_password(
     data: ForgotPasswordRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Validates that the user exists in PostgreSQL, generates a 6-digit OTP in Redis,
-    and prints it prominently to the backend terminal for local verification.
+    E-mails a single-use code (15 min, 5 guesses). The answer is the same whether or not the
+    account exists, so this endpoint cannot be used to find out who is registered.
     """
     clean_email = data.email.strip().lower()
+    ip = _get_client_ip(request)
+    rate_limit.check(f"forgot:{ip}", limit=5)
+    sent = {"success": True, "message": GENERIC_RESET_SENT, "email": clean_email, "debug_code": None}
 
-    # 1. Verify user exists in PostgreSQL
-    # Prefer the manager when one e-mail exists in several restaurants (scalar_one_or_none would 500 there)
-    stmt = select(User).where(func.lower(User.email) == clean_email).order_by(desc(User.role == UserRole.MANAGER)).limit(1)
-    res = await db.execute(stmt)
-    user = res.scalars().first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No account found with email '{clean_email}'.",
+    users = await _password_users(db, clean_email)
+    if not users:
+        return sent
+
+    now = datetime.now(timezone.utc)
+    latest = (await db.execute(
+        select(func.max(PasswordResetCode.created_at)).where(PasswordResetCode.user_id.in_([u.id for u in users]))
+    )).scalar()
+    if latest and (now - latest).total_seconds() < settings.SIGNUP_CODE_RESEND_SECONDS:
+        wait = settings.SIGNUP_CODE_RESEND_SECONDS - int((now - latest).total_seconds())
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=f"A code was just sent. Please wait {wait} seconds before asking again.")
+
+    code = f"{secrets.randbelow(900000) + 100000}"
+    for user in users:
+        # Only the newest code works
+        await db.execute(
+            update(PasswordResetCode)
+            .where(PasswordResetCode.user_id == user.id, PasswordResetCode.used_at.is_(None))
+            .values(used_at=now)
         )
-
-    # 2. Generate and cache 6-digit OTP
-    code = await OTPService.request_otp(f"reset:{clean_email}")
-
-    # 3. Print prominently to terminal
-    print("\n" + "=" * 60, flush=True)
-    print(f"🔑 [MEZFLOW PASSWORD RESET OTP]", flush=True)
-    print(f"📧 Account:       {clean_email}", flush=True)
-    print(f"🔢 6-Digit OTP:   >>> {code} <<<", flush=True)
-    print(f"⏳ Expiration:    5 minutes", flush=True)
-    print("=" * 60 + "\n", flush=True)
-
-    return {
-        "success": True,
-        "message": f"Verification code generated and printed to terminal for '{clean_email}'.",
-        "email": clean_email,
-        "debug_code": code if settings.ENVIRONMENT in ("development", "test") else None,
-    }
+        db.add(PasswordResetCode(
+            user_id=user.id,
+            code_hash=hash_signup_code(str(user.id), code),
+            expires_at=now + timedelta(minutes=settings.PASSWORD_RESET_EXPIRE_MINUTES),
+        ))
+        await record_audit_log(
+            db=db,
+            restaurant_id=user.restaurant_id,
+            user_id=user.id,
+            action="PASSWORD_RESET_REQUESTED",
+            resource_type="user",
+            resource_id=str(user.id),
+            ip_address=ip,
+        )
+    try:
+        await notify.send_code_email(clean_email, purpose="reset", code=code, minutes=settings.PASSWORD_RESET_EXPIRE_MINUTES)
+    except notify.NotifyError:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Could not send the email right now. Please try again shortly.")
+    await db.commit()
+    if settings.ENVIRONMENT == "test":
+        sent["debug_code"] = code  # automated tests only; never in development or production
+    return sent
 
 
 @router.post(
     "/reset-password",
     response_model=TokenResponse,
     tags=["Authentication"],
-    summary="Verify OTP and update user password",
+    summary="Check the e-mailed code, set the new password and log in",
 )
 async def reset_password(
     data: ResetPasswordRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Verifies the 6-digit OTP code against Redis, updates the bcrypt password in PostgreSQL,
-    and returns a fresh JWT authentication token.
-    """
+    """Sets the new password, unlocks the account and logs in on this device."""
     clean_email = data.email.strip().lower()
-
-    # 1. Verify OTP code
-    is_valid, err_msg = await OTPService.verify_otp(f"reset:{clean_email}", data.code)
-    if not is_valid:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=err_msg or "Invalid or expired reset code.",
-        )
-
-    # 2. Fetch user
-    stmt = (
-        select(User)
-        .options(selectinload(User.profile))
-        .where(func.lower(User.email) == clean_email)
-        .order_by(desc(User.role == UserRole.MANAGER))
-        .limit(1)
-    )
-    res = await db.execute(stmt)
-    user = res.scalars().first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Account not found.",
-        )
-
-    # 3. Update password hash
-    user.hashed_password = get_password_hash(data.new_password)
-    user.updated_at = datetime.now(timezone.utc)
-
-    # 4. Audit Log
     ip = _get_client_ip(request)
-    if user.restaurant_id:
-        await record_audit_log(
-            db=db,
-            restaurant_id=user.restaurant_id,
-            user_id=user.id,
-            action="PASSWORD_RESET_SUCCESS",
-            resource_type="user",
-            resource_id=str(user.id),
-            details={"email": clean_email},
-            ip_address=ip,
-        )
+    rate_limit.check(f"reset:{ip}", limit=10)
+    bad_code = HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This code is wrong or has expired. Please request a new one.")
+    now = datetime.now(timezone.utc)
 
-    await db.commit()
-    await db.refresh(user)
+    matched = None
+    left = None
+    for user in await _password_users(db, clean_email):
+        row = (await db.execute(
+            select(PasswordResetCode)
+            .where(PasswordResetCode.user_id == user.id, PasswordResetCode.used_at.is_(None), PasswordResetCode.expires_at > now)
+            .order_by(desc(PasswordResetCode.created_at))
+            .limit(1)
+        )).scalar_one_or_none()
+        if not row:
+            continue
+        row.attempts += 1
+        if secrets.compare_digest(row.code_hash, hash_signup_code(str(user.id), data.code)):
+            matched = (user, row)
+            break
+        left = settings.PASSWORD_RESET_MAX_ATTEMPTS - row.attempts
+        if left <= 0:
+            row.used_at = now  # burned
+    if not matched:
+        await db.commit()  # keep the attempt counters; get_db rolls back on exceptions
+        if left and left > 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Incorrect code. {left} attempt(s) left.")
+        raise bad_code
 
-    # 5. Issue JWT Token
-    token = create_access_token(
-        subject=str(user.id),
-        claims={
-            "role": user.role.value,
-            "restaurant_id": str(user.restaurant_id) if user.restaurant_id else None,
-        },
+    user, row = matched
+    user.hashed_password = get_password_hash(data.new_password)
+    user.failed_login_attempts = 0
+    user.locked_until = None
+    await db.execute(
+        update(PasswordResetCode)
+        .where(PasswordResetCode.user_id == user.id, PasswordResetCode.used_at.is_(None))
+        .values(used_at=now)
     )
-
-    return TokenResponse(
-        access_token=token,
-        token_type="bearer",
-        role=user.role.value,
+    await record_audit_log(
+        db=db,
         restaurant_id=user.restaurant_id,
         user_id=user.id,
-        display_name=user.profile.display_name if user.profile else clean_email.split("@")[0],
-        preferred_language=user.profile.preferred_language if user.profile else "en",
+        action="PASSWORD_RESET_SUCCESS",
+        resource_type="user",
+        resource_id=str(user.id),
+        ip_address=ip,
     )
+    await db.commit()
+    return _token_response(user, user.restaurant_id)
 
 
 @router.get("/me", response_model=UserResponse, tags=["Authentication"])
@@ -1093,6 +1158,7 @@ async def register_restaurant_start(
     db: AsyncSession = Depends(get_db),
 ):
     """Validates the form, remembers it for 15 minutes and e-mails a verification code."""
+    rate_limit.check(f"register:{_get_client_ip(request)}", limit=10)
     email = data.email.strip().lower()
     # EmailStr accepts one-letter endings like "ali@gmail.c"; no such domain exists, so catch the typo here
     if len(email.rsplit(".", 1)[-1]) < 2:
@@ -1127,12 +1193,7 @@ async def register_restaurant_start(
     pending.last_sent_at = now
 
     try:
-        await notify.send_email(
-            email,
-            "Your MezFlow verification code",
-            f"Welcome to MezFlow!\n\nYour verification code is {code}. It expires in {settings.SIGNUP_CODE_EXPIRE_MINUTES} minutes.\n\n"
-            "If you did not try to create a MezFlow account, ignore this e-mail.",
-        )
+        await notify.send_code_email(email, purpose="signup", code=code, minutes=settings.SIGNUP_CODE_EXPIRE_MINUTES)
     except notify.NotifyError:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Could not send the verification email right now. Please try again shortly.")
     await db.commit()
@@ -1151,6 +1212,7 @@ async def register_restaurant_verify(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
+    rate_limit.check(f"register-verify:{_get_client_ip(request)}", limit=20)
     email = data.email.strip().lower()
     bad_code = HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This code is wrong or has expired. Please request a new one.")
     now = datetime.now(timezone.utc)

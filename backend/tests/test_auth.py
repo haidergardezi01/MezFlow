@@ -269,8 +269,16 @@ async def test_duplicate_email_in_same_restaurant_rejected(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_forgot_password_and_reset_flow(client: AsyncClient):
+async def test_forgot_password_and_reset_flow(client: AsyncClient, monkeypatch):
     """TEST-M1-13: Verifies forgot password code generation and reset flow with PostgreSQL update."""
+    from app.core.config import settings
+    from app.services import notify
+
+    async def no_mail(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(notify, "send_email", no_mail)
+    monkeypatch.setattr(settings, "SIGNUP_CODE_RESEND_SECONDS", 0)  # the restore step asks again right away
     target_email = "manager@mezflow.com"
 
     # 1. Request reset code
