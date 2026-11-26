@@ -101,6 +101,15 @@ export default function LoginPage() {
       return;
     }
 
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim())) {
+      setError(
+        isUrdu
+          ? "ای میل درست نہیں ہے۔ مثال: name@gmail.com"
+          : "Email address is not valid. Please check it (e.g. name@gmail.com)."
+      );
+      return;
+    }
+
     setError(null);
     setLoading(true);
 
@@ -312,7 +321,7 @@ export default function LoginPage() {
           )}
 
           {/* Clean SaaS Sign In Form */}
-          <form onSubmit={handleLogin} className="space-y-4 relative">
+          <form onSubmit={handleLogin} onChange={() => setError(null)} className="space-y-4 relative">
             {/* Business Email */}
             <div>
               <label className="block text-xs font-medium text-slate-300 mb-1.5">
@@ -326,7 +335,7 @@ export default function LoginPage() {
                   autoComplete="email"
                   placeholder="manager@restaurant.com"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => setEmail(e.target.value.toLowerCase())}
                   className="w-full bg-surface-dark border border-surface-border rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-all"
                 />
               </div>
@@ -538,7 +547,7 @@ export default function LoginPage() {
 
             {/* STEP 1: ENTER EMAIL */}
             {forgotStep === "email" ? (
-              <form onSubmit={handleRequestResetCode} className="space-y-4">
+              <form onSubmit={handleRequestResetCode} onChange={() => setForgotError(null)} className="space-y-4">
                 <div>
                   <label className="block text-xs font-medium text-slate-300 mb-1.5">
                     {isUrdu ? "اکاؤنٹ ای میل ایڈریس *" : "Account Email Address *"}
@@ -550,7 +559,7 @@ export default function LoginPage() {
                       required
                       placeholder="manager@restaurant.com"
                       value={forgotEmail}
-                      onChange={(e) => setForgotEmail(e.target.value)}
+                      onChange={(e) => setForgotEmail(e.target.value.toLowerCase())}
                       className="w-full bg-surface-dark border border-surface-border rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-brand-500"
                     />
                   </div>
@@ -580,7 +589,7 @@ export default function LoginPage() {
               </form>
             ) : (
               /* STEP 2: ENTER OTP & NEW PASSWORD */
-              <form onSubmit={handleResetPassword} className="space-y-3.5">
+              <form onSubmit={handleResetPassword} onChange={() => setForgotError(null)} className="space-y-3.5">
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="block text-xs font-medium text-slate-300">

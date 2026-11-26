@@ -22,6 +22,18 @@ class Settings(BaseSettings):
     CLERK_JWKS_URL: Optional[str] = None
     CLERK_ISSUER: Optional[str] = None
 
+    # Sign-up e-mail verification code
+    SIGNUP_CODE_EXPIRE_MINUTES: int = 15
+    SIGNUP_CODE_MAX_ATTEMPTS: int = 5
+    SIGNUP_CODE_RESEND_SECONDS: int = 60
+
+    # Outgoing e-mail (sign-up codes). Unset = dev prints the message to the console.
+    SMTP_HOST: Optional[str] = None
+    SMTP_PORT: int = 587
+    SMTP_USER: Optional[str] = None
+    SMTP_PASSWORD: Optional[str] = None
+    SMTP_FROM: Optional[str] = None
+
     # PostgreSQL Database
     POSTGRES_SERVER: str = "localhost"
     POSTGRES_PORT: int = 5433

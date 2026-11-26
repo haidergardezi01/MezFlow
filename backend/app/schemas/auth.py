@@ -104,6 +104,20 @@ class RestaurantRegisterRequest(BaseModel):
     clerk_org_id: Optional[str] = None
 
 
+class SignupVerifyRequest(BaseModel):
+    email: EmailStr
+    code: str = Field(..., pattern=r"^\d{6}$")
+
+
+class ClerkRegisterRequest(BaseModel):
+    """Optional workspace details for a Google sign-up; identity comes from the Clerk token."""
+    restaurant_name: Optional[str] = Field(None, min_length=2, max_length=255)
+    manager_name: Optional[str] = Field(None, min_length=2, max_length=100)
+    currency: Optional[str] = Field("PKR", min_length=3, max_length=10)
+    phone: Optional[str] = None
+    address: Optional[str] = None
+
+
 class OnboardingRequest(BaseModel):
     restaurant_name: Optional[str] = Field(None, min_length=2, max_length=255)
     address: Optional[str] = None

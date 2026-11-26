@@ -38,6 +38,54 @@ def _try_decode_clerk_token(token: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _clerk_jwks_url() -> Optional[str]:
+    if settings.CLERK_JWKS_URL:
+        return settings.CLERK_JWKS_URL
+    if settings.CLERK_ISSUER:
+        return f"{settings.CLERK_ISSUER.rstrip('/')}/.well-known/jwks.json"
+    return None
+
+
+def verify_clerk_session_token(token: str) -> Optional[Dict[str, Any]]:
+    """Signature-checked Clerk claims or None. Unlike _try_decode_clerk_token, never trusts unsigned claims."""
+    jwks_url = _clerk_jwks_url()
+    if not token or not jwks_url:
+        return None
+    try:
+        from jwt import PyJWKClient
+        signing_key = PyJWKClient(jwks_url).get_signing_key_from_jwt(token)
+        return jwt.decode(token, signing_key.key, algorithms=["RS256"], options={"verify_exp": True, "verify_aud": False})
+    except Exception:
+        return None
+
+
+def _fetch_clerk_user(clerk_user_id: str) -> Dict[str, Any]:
+    import json
+    import urllib.request
+    req = urllib.request.Request(
+        f"https://api.clerk.com/v1/users/{clerk_user_id}",
+        headers={"Authorization": f"Bearer {settings.CLERK_SECRET_KEY}"},
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+async def fetch_clerk_verified_email(clerk_user_id: str) -> Optional[str]:
+    """Primary e-mail of a Clerk user, only if Clerk (e.g. Google) has verified it. The session JWT carries no e-mail."""
+    if not settings.CLERK_SECRET_KEY:
+        return None
+    import asyncio
+    try:
+        data = await asyncio.to_thread(_fetch_clerk_user, clerk_user_id)
+    except Exception:
+        return None
+    primary_id = data.get("primary_email_address_id")
+    for e in data.get("email_addresses") or []:
+        if e.get("id") == primary_id and (e.get("verification") or {}).get("status") == "verified":
+            return str(e.get("email_address", "")).strip().lower() or None
+    return None
+
+
 async def get_current_user(
     auth_header: Optional[HTTPAuthorizationCredentials] = Depends(security_bearer),
     db: AsyncSession = Depends(get_db),

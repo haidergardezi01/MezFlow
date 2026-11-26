@@ -1,16 +1,26 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_, desc
+from sqlalchemy import select, or_, desc, func
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import get_db, get_current_user, require_roles, enforce_tenant
+from app.api.deps import (
+    get_db,
+    get_current_user,
+    require_roles,
+    enforce_tenant,
+    security_bearer,
+    verify_clerk_session_token,
+    fetch_clerk_verified_email,
+)
 from app.core.config import settings
-from app.core.security import get_password_hash, verify_password, create_access_token
+from app.core.security import get_password_hash, verify_password, create_access_token, hash_signup_code
 from app.models.user import User, UserProfile, UserRole
 from app.models.audit import AuditLog
+from app.models.pending_registration import PendingRegistration
 from app.models.restaurant import Restaurant
 import re
 import secrets
@@ -28,10 +38,13 @@ from app.schemas.auth import (
     UserResponse,
     AuditLogResponse,
     RestaurantRegisterRequest,
+    ClerkRegisterRequest,
+    SignupVerifyRequest,
     OnboardingRequest,
     ForgotPasswordRequest,
     ResetPasswordRequest,
 )
+from app.services import notify
 from app.services.otp import OTPService
 from app.services.audit import record_audit_log
 
@@ -259,7 +272,6 @@ async def seed_starter_team(
     rest_res = await db.execute(select(Restaurant).where(Restaurant.id == current_user.restaurant_id))
     rest = rest_res.scalar_one_or_none()
     slug = rest.slug if rest else "workspace"
-    default_pass = get_password_hash("team1234")
 
     starter_roles = [
         (f"chef.{slug}@mezflow.com", f"{rest.name if rest else 'Kitchen'} Head Chef", UserRole.KITCHEN_STAFF),
@@ -275,7 +287,8 @@ async def seed_starter_team(
             u = User(
                 restaurant_id=current_user.restaurant_id,
                 email=s_email,
-                hashed_password=current_user.hashed_password or default_pass,
+                # Never the manager's own password: that would let any cook log in as manager.
+                hashed_password=get_password_hash(secrets.token_urlsafe(24)),
                 role=s_role,
                 is_active=True,
                 is_verified=True,
@@ -326,7 +339,7 @@ async def login(
             .where(
                 User.restaurant_id == data.restaurant_id,
                 or_(
-                    User.email == clean_username,
+                    func.lower(User.email) == clean_username.lower(),
                     User.phone_number == clean_username,
                 ),
             )
@@ -339,7 +352,7 @@ async def login(
             .options(selectinload(User.profile))
             .where(
                 or_(
-                    User.email == clean_username,
+                    func.lower(User.email) == clean_username.lower(),
                     User.phone_number == clean_username,
                 ),
             )
@@ -356,7 +369,7 @@ async def login(
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials.",
+            detail="Email or password is incorrect. Please check both and try again.",
         )
 
     if not user.hashed_password:
@@ -368,7 +381,7 @@ async def login(
     if not verify_password(data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials.",
+            detail="Email or password is incorrect. Please check both and try again.",
         )
 
     if not user.is_active:
@@ -456,7 +469,7 @@ async def verify_otp(
             .where(
                 User.restaurant_id == target_restaurant_id,
                 or_(
-                    User.email == clean_dest,
+                    func.lower(User.email) == clean_dest.lower(),
                     User.phone_number == clean_dest,
                 ),
             )
@@ -469,7 +482,7 @@ async def verify_otp(
             .options(selectinload(User.profile))
             .where(
                 or_(
-                    User.email == clean_dest,
+                    func.lower(User.email) == clean_dest.lower(),
                     User.phone_number == clean_dest,
                 ),
             )
@@ -584,9 +597,10 @@ async def forgot_password(
     clean_email = data.email.strip().lower()
 
     # 1. Verify user exists in PostgreSQL
-    stmt = select(User).where(User.email == clean_email)
+    # Prefer the manager when one e-mail exists in several restaurants (scalar_one_or_none would 500 there)
+    stmt = select(User).where(func.lower(User.email) == clean_email).order_by(desc(User.role == UserRole.MANAGER)).limit(1)
     res = await db.execute(stmt)
-    user = res.scalar_one_or_none()
+    user = res.scalars().first()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -641,10 +655,12 @@ async def reset_password(
     stmt = (
         select(User)
         .options(selectinload(User.profile))
-        .where(User.email == clean_email)
+        .where(func.lower(User.email) == clean_email)
+        .order_by(desc(User.role == UserRole.MANAGER))
+        .limit(1)
     )
     res = await db.execute(stmt)
-    user = res.scalar_one_or_none()
+    user = res.scalars().first()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -799,66 +815,50 @@ async def list_audit_logs(
     return result.scalars().all()
 
 
-@router.post(
-    "/register-restaurant",
-    response_model=TokenResponse,
-    status_code=status.HTTP_201_CREATED,
-    tags=["Authentication", "Multi-Tenancy"],
-    summary="Register a brand-new restaurant workspace with Manager credentials",
-)
-async def register_restaurant(
-    data: RestaurantRegisterRequest,
+def _token_response(user: User, restaurant_id) -> TokenResponse:
+    return TokenResponse(
+        access_token=create_access_token(
+            subject=str(user.id),
+            claims={"role": user.role.value, "restaurant_id": str(restaurant_id)},
+        ),
+        token_type="bearer",
+        role=user.role.value,
+        restaurant_id=restaurant_id,
+        user_id=user.id,
+        display_name=user.profile.display_name if user.profile else None,
+        preferred_language=user.profile.preferred_language if user.profile else "en",
+    )
+
+
+async def _email_taken(db: AsyncSession, email: str) -> bool:
+    res = await db.execute(select(User.id).where(func.lower(User.email) == email.lower()).limit(1))
+    return res.first() is not None
+
+
+ACCOUNT_EXISTS = "An account with this email already exists. Please sign in instead."
+
+
+async def _provision_workspace(
+    db: AsyncSession,
     request: Request,
-    db: AsyncSession = Depends(get_db),
-):
+    *,
+    restaurant_name: str,
+    manager_name: str,
+    email: str,
+    password_hash: str,
+    currency: str = "PKR",
+    phone: Optional[str] = None,
+    address: Optional[str] = None,
+    clerk_user_id: Optional[str] = None,
+) -> User:
     """
     Provisions a new isolated multi-tenant restaurant workspace in PostgreSQL:
-    - Creates Restaurant record with unique URL slug.
-    - Creates Manager User account with secure bcrypt hashed password.
-    - Seeds 10 starter dining tables with QR code tokens.
-    - Seeds starter menu categories.
-    - Issues an authenticated JWT session token.
+    restaurant with unique slug, manager account, starter team, 10 QR tables, starter menu.
+    Callers must already have proven the e-mail (code or Clerk) and checked it is free.
     (FR-M1-01, FR-M1-05, Multi-Tenancy)
     """
-    clean_email = data.email.strip().lower()
-
-    if not data.password and not data.clerk_user_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Either password or verified Clerk user ID must be provided.",
-        )
-
-    # 1. Check if user or clerk_user_id already registered
-    existing_user_stmt = select(User).options(selectinload(User.restaurant), selectinload(User.profile)).where(
-        or_(
-            User.email == clean_email,
-            User.clerk_user_id == data.clerk_user_id if data.clerk_user_id else False,
-        )
-    )
-    existing_user_res = await db.execute(existing_user_stmt)
-    existing_user = existing_user_res.scalar_one_or_none()
-
-    if existing_user and existing_user.restaurant_id:
-        # If user is already registered via Clerk and has a restaurant, return token directly
-        token = create_access_token(
-            subject=str(existing_user.id),
-            claims={
-                "role": existing_user.role.value,
-                "restaurant_id": str(existing_user.restaurant_id),
-            },
-        )
-        return TokenResponse(
-            access_token=token,
-            token_type="bearer",
-            role=existing_user.role.value,
-            restaurant_id=existing_user.restaurant_id,
-            user_id=existing_user.id,
-            display_name=existing_user.profile.display_name if existing_user.profile else data.manager_name,
-            preferred_language=existing_user.profile.preferred_language if existing_user.profile else "en",
-        )
-
     # 2. Derive unique restaurant slug
-    base_slug = re.sub(r"[^a-z0-9]+", "-", data.restaurant_name.strip().lower()).strip("-")
+    base_slug = re.sub(r"[^a-z0-9]+", "-", restaurant_name.strip().lower()).strip("-")
     if not base_slug:
         base_slug = "restaurant"
     candidate_slug = base_slug
@@ -871,61 +871,52 @@ async def register_restaurant(
         candidate_slug = f"{base_slug}-{suffix}"
 
     # 3. Create Restaurant
-    clerk_org_id = data.clerk_org_id or (f"org_{data.clerk_user_id[-8:]}" if data.clerk_user_id else None)
+    clerk_org_id = f"org_{clerk_user_id[-8:]}" if clerk_user_id else None
     restaurant = Restaurant(
-        name=data.restaurant_name.strip(),
+        name=restaurant_name.strip(),
         slug=candidate_slug,
-        address=data.address,
-        phone=data.phone,
-        currency=data.currency.upper(),
+        address=address,
+        phone=phone,
+        currency=currency.upper(),
         clerk_org_id=clerk_org_id,
         is_active=True,
     )
     db.add(restaurant)
     await db.flush()
 
-    # 4. Create or link Manager User
-    hashed_pwd = get_password_hash(data.password) if data.password else get_password_hash(secrets.token_urlsafe(32))
-    if existing_user:
-        existing_user.restaurant_id = restaurant.id
-        existing_user.role = UserRole.MANAGER
-        if data.clerk_user_id and not existing_user.clerk_user_id:
-            existing_user.clerk_user_id = data.clerk_user_id
-        manager_user = existing_user
-    else:
-        manager_user = User(
-            restaurant_id=restaurant.id,
-            email=clean_email,
-            phone_number=data.phone,
-            hashed_password=hashed_pwd,
-            clerk_user_id=data.clerk_user_id,
-            role=UserRole.MANAGER,
-            is_active=True,
-            is_verified=True,
-        )
-        db.add(manager_user)
-        await db.flush()
-
-        profile = UserProfile(
-            user_id=manager_user.id,
-            display_name=data.manager_name.strip(),
-            preferred_language="en",
-            push_notifications_enabled=True,
-        )
-        db.add(profile)
+    # 4. Create Manager User
+    manager_user = User(
+        restaurant_id=restaurant.id,
+        email=email,
+        phone_number=phone,
+        hashed_password=password_hash,
+        clerk_user_id=clerk_user_id,
+        role=UserRole.MANAGER,
+        is_active=True,
+        is_verified=True,
+    )
+    db.add(manager_user)
+    await db.flush()
+    profile = UserProfile(
+        user_id=manager_user.id,
+        display_name=manager_name.strip(),
+        preferred_language="en",
+        push_notifications_enabled=True,
+    )
+    db.add(profile)
     await db.flush()
 
     # 4b. Seed Real Starter Team Profiles for this restaurant
     starter_team = [
-        (f"chef.{candidate_slug}@mezflow.com", f"{data.restaurant_name.strip()} Head Chef", UserRole.KITCHEN_STAFF),
-        (f"waiter.{candidate_slug}@mezflow.com", f"{data.restaurant_name.strip()} Floor Captain", UserRole.SERVICE_STAFF),
-        (f"cashier.{candidate_slug}@mezflow.com", f"{data.restaurant_name.strip()} Cashier Station", UserRole.CASHIER),
+        (f"chef.{candidate_slug}@mezflow.com", f"{restaurant_name.strip()} Head Chef", UserRole.KITCHEN_STAFF),
+        (f"waiter.{candidate_slug}@mezflow.com", f"{restaurant_name.strip()} Floor Captain", UserRole.SERVICE_STAFF),
+        (f"cashier.{candidate_slug}@mezflow.com", f"{restaurant_name.strip()} Cashier Station", UserRole.CASHIER),
     ]
     for s_email, s_name, s_role in starter_team:
         s_user = User(
             restaurant_id=restaurant.id,
             email=s_email,
-            hashed_password=hashed_pwd,
+            hashed_password=get_password_hash(secrets.token_urlsafe(24)),  # manager sets real ones from the console
             role=s_role,
             is_active=True,
             is_verified=True,
@@ -1079,30 +1070,194 @@ async def register_restaurant(
         action="RESTAURANT_REGISTERED",
         resource_type="restaurant",
         resource_id=str(restaurant.id),
-        details={"restaurant_name": restaurant.name, "slug": restaurant.slug, "email": clean_email},
+        details={"restaurant_name": restaurant.name, "slug": restaurant.slug, "email": email},
         ip_address=ip,
     )
 
     await db.commit()
+    res = await db.execute(select(User).options(selectinload(User.profile)).where(User.id == manager_user.id))
+    return res.scalar_one()
 
-    # 8. Issue authenticated session token
-    token = create_access_token(
-        subject=str(manager_user.id),
-        claims={
-            "role": manager_user.role.value,
-            "restaurant_id": str(restaurant.id),
-        },
-    )
 
-    return TokenResponse(
-        access_token=token,
-        token_type="bearer",
-        role=manager_user.role.value,
-        restaurant_id=restaurant.id,
-        user_id=manager_user.id,
-        display_name=profile.display_name,
-        preferred_language=profile.preferred_language,
+SIGNUP_SENT = "We sent a 6-digit verification code to your email."
+
+
+@router.post(
+    "/register-restaurant/start",
+    tags=["Authentication", "Multi-Tenancy"],
+    summary="Step 1 of sign-up: e-mail a 6-digit code (nothing is created yet)",
+)
+async def register_restaurant_start(
+    data: RestaurantRegisterRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Validates the form, remembers it for 15 minutes and e-mails a verification code."""
+    email = data.email.strip().lower()
+    # EmailStr accepts one-letter endings like "ali@gmail.c"; no such domain exists, so catch the typo here
+    if len(email.rsplit(".", 1)[-1]) < 2:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email address is not valid. Please check the part after the dot (e.g. name@gmail.com).")
+    if not data.password or len(data.password) < 8:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Password must be at least 8 characters long.")
+    if await _email_taken(db, email):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=ACCOUNT_EXISTS)
+
+    now = datetime.now(timezone.utc)
+    pending = (await db.execute(select(PendingRegistration).where(PendingRegistration.email == email))).scalar_one_or_none()
+    if pending and (now - pending.last_sent_at).total_seconds() < settings.SIGNUP_CODE_RESEND_SECONDS:
+        wait = settings.SIGNUP_CODE_RESEND_SECONDS - int((now - pending.last_sent_at).total_seconds())
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=f"A code was just sent. Please wait {wait} seconds before asking again.")
+
+    code = f"{secrets.randbelow(900000) + 100000}"
+    payload = {
+        "restaurant_name": data.restaurant_name.strip(),
+        "manager_name": data.manager_name.strip(),
+        "currency": data.currency.upper(),
+        "phone": (data.phone or "").strip() or None,
+        "address": (data.address or "").strip() or None,
+    }
+    if not pending:
+        pending = PendingRegistration(email=email)
+        db.add(pending)
+    pending.payload = payload
+    pending.password_hash = get_password_hash(data.password)
+    pending.code_hash = hash_signup_code(email, code)
+    pending.expires_at = now + timedelta(minutes=settings.SIGNUP_CODE_EXPIRE_MINUTES)
+    pending.attempts = 0
+    pending.last_sent_at = now
+
+    try:
+        await notify.send_email(
+            email,
+            "Your MezFlow verification code",
+            f"Welcome to MezFlow!\n\nYour verification code is {code}. It expires in {settings.SIGNUP_CODE_EXPIRE_MINUTES} minutes.\n\n"
+            "If you did not try to create a MezFlow account, ignore this e-mail.",
+        )
+    except notify.NotifyError:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Could not send the verification email right now. Please try again shortly.")
+    await db.commit()
+    return {"success": True, "message": SIGNUP_SENT, "email": email}
+
+
+@router.post(
+    "/register-restaurant/verify",
+    response_model=TokenResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Authentication", "Multi-Tenancy"],
+    summary="Step 2 of sign-up: check the code, create the workspace and log in",
+)
+async def register_restaurant_verify(
+    data: SignupVerifyRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    email = data.email.strip().lower()
+    bad_code = HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This code is wrong or has expired. Please request a new one.")
+    now = datetime.now(timezone.utc)
+    pending = (await db.execute(select(PendingRegistration).where(PendingRegistration.email == email))).scalar_one_or_none()
+    if not pending or pending.expires_at < now or pending.attempts >= settings.SIGNUP_CODE_MAX_ATTEMPTS:
+        raise bad_code
+
+    pending.attempts += 1
+    if not secrets.compare_digest(pending.code_hash, hash_signup_code(email, data.code)):
+        left = settings.SIGNUP_CODE_MAX_ATTEMPTS - pending.attempts
+        await db.commit()  # keep the attempt count; get_db rolls back on exceptions
+        if left <= 0:
+            raise bad_code
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Incorrect code. {left} attempt(s) left.")
+
+    if await _email_taken(db, email):
+        await db.delete(pending)
+        await db.commit()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=ACCOUNT_EXISTS)
+
+    p = pending.payload
+    password_hash = pending.password_hash
+    await db.delete(pending)
+    manager = await _provision_workspace(
+        db,
+        request,
+        restaurant_name=p["restaurant_name"],
+        manager_name=p["manager_name"],
+        email=email,
+        password_hash=password_hash,
+        currency=p.get("currency") or "PKR",
+        phone=p.get("phone"),
+        address=p.get("address"),
     )
+    return _token_response(manager, manager.restaurant_id)
+
+
+@router.post(
+    "/register-restaurant",
+    response_model=TokenResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Authentication", "Multi-Tenancy"],
+    summary="Google (Clerk) sign-up: create or open the workspace for a verified Clerk user",
+)
+async def register_restaurant(
+    data: ClerkRegisterRequest,
+    request: Request,
+    auth_header: Optional[HTTPAuthorizationCredentials] = Depends(security_bearer),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Requires the Clerk session token in the Authorization header; the Clerk user id and e-mail come
+    from Clerk itself, never from the request body. E-mail/password sign-ups use /register-restaurant/start.
+    """
+    claims = verify_clerk_session_token(auth_header.credentials if auth_header else "")
+    if not claims or not claims.get("sub"):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Google sign-in could not be verified. Please try again.")
+    clerk_user_id = str(claims["sub"])
+
+    def _load(*where):
+        return select(User).options(selectinload(User.profile)).where(*where)
+
+    # Returning Google user: open their workspace
+    user = (await db.execute(_load(User.clerk_user_id == clerk_user_id))).scalar_one_or_none()
+    if user:
+        if not user.is_active:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is deactivated.")
+        return _token_response(user, user.restaurant_id)
+
+    email = await fetch_clerk_verified_email(clerk_user_id)
+    if not email:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Your Google email is not verified. Please try again.")
+
+    # Same e-mail already registered with the form: Google has proven ownership, so link it to that account
+    matches = (await db.execute(_load(func.lower(User.email) == email))).scalars().all()
+    if len(matches) > 1:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This email belongs to several restaurants. Please sign in with your password.")
+    if matches:
+        user = matches[0]
+        if not user.is_active:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is deactivated.")
+        user.clerk_user_id = clerk_user_id
+        await record_audit_log(
+            db=db,
+            restaurant_id=user.restaurant_id,
+            user_id=user.id,
+            action="GOOGLE_ACCOUNT_LINKED",
+            resource_type="user",
+            resource_id=str(user.id),
+            ip_address=_get_client_ip(request),
+        )
+        await db.commit()
+        return _token_response(user, user.restaurant_id)
+
+    manager = await _provision_workspace(
+        db,
+        request,
+        restaurant_name=data.restaurant_name or f"{(data.manager_name or 'My').split(' ')[0]}'s Restaurant",
+        manager_name=data.manager_name or email.split("@")[0],
+        email=email,
+        password_hash=get_password_hash(secrets.token_urlsafe(32)),  # Google-only until they set one via Forgot password
+        currency=(data.currency or "PKR").upper(),
+        phone=data.phone,
+        address=data.address,
+        clerk_user_id=clerk_user_id,
+    )
+    return _token_response(manager, manager.restaurant_id)
 
 
 @router.post(

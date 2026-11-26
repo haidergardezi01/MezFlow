@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Any, Dict
 import bcrypt
@@ -62,3 +64,9 @@ def decode_access_token(token: str) -> Optional[Dict[str, Any]]:
         return payload
     except JWTError:
         return None
+
+
+def hash_signup_code(email: str, code: str) -> str:
+    """6-digit codes are guessable offline, so they are keyed with SECRET_KEY and bound to the e-mail."""
+    msg = f"{email.lower()}:{code}".encode("utf-8")
+    return hmac.new(settings.SECRET_KEY.encode("utf-8"), msg, hashlib.sha256).hexdigest()

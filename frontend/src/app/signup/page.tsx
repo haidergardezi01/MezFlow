@@ -11,7 +11,6 @@ import {
   User as UserIcon,
   Phone,
   MapPin,
-  DollarSign,
   ArrowRight,
   ArrowLeft,
   Sparkles,
@@ -33,9 +32,9 @@ export default function SignUpPage() {
   const { setAuth, language } = useAuthStore();
   const isUrdu = language === "ur";
 
-  // Headless Clerk SDK Hooks (100% custom UI, zero external vendor widgets)
-  const { isLoaded, signUp, setActive } = useSignUp();
-  const { isSignedIn } = useAuth();
+  // Clerk is used only for "Sign up with Google"; e-mail sign-up is verified by our own backend code
+  const { isLoaded, signUp } = useSignUp();
+  const { isSignedIn, getToken } = useAuth();
   const { user } = useUser();
 
   // Step 1 Form States
@@ -58,6 +57,23 @@ export default function SignUpPage() {
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
+  const signInAndOpenConsole = (data: any, fallbackName: string) => {
+    setAuth(data.access_token, {
+      id: data.user_id,
+      restaurant_id: data.restaurant_id,
+      role: data.role,
+      is_active: true,
+      is_verified: true,
+      profile: {
+        id: data.user_id,
+        display_name: data.display_name || fallbackName,
+        preferred_language: data.preferred_language || "en",
+        push_notifications_enabled: true,
+      },
+    });
+    router.push("/admin");
+  };
+
   // Auto-provision if user returns from Google SSO
   React.useEffect(() => {
     let active = true;
@@ -69,38 +85,24 @@ export default function SignUpPage() {
 
       try {
         setLoading(true);
-        const res = await apiClient.post("/auth/register-restaurant", {
-          restaurant_name: draft?.restaurant_name || `${user.firstName || "Manager"}'s Restaurant`,
-          manager_name: draft?.manager_name || user.fullName || "Manager",
-          email: user.primaryEmailAddress?.emailAddress || "",
-          currency: draft?.currency || "PKR",
-          phone: draft?.phone,
-          address: draft?.address,
-          clerk_user_id: user.id,
-        });
+        // The backend takes the Google identity from this Clerk token, never from the body
+        const clerkToken = await getToken();
+        if (!clerkToken) throw new Error("Google sign-in session expired. Please try again.");
+        const res = await apiClient.post(
+          "/auth/register-restaurant",
+          {
+            restaurant_name: draft?.restaurant_name || undefined,
+            manager_name: draft?.manager_name || user.fullName || undefined,
+            currency: draft?.currency || "PKR",
+            phone: draft?.phone,
+            address: draft?.address,
+          },
+          { headers: { Authorization: `Bearer ${clerkToken}` } }
+        );
 
         if (!active) return;
-        const data = res.data;
-        if (typeof window !== "undefined") {
-          localStorage.setItem("mezflow_token", data.access_token);
-          sessionStorage.removeItem("mezflow_restaurant_draft");
-        }
-
-        setAuth(data.access_token, {
-          id: data.user_id,
-          restaurant_id: data.restaurant_id,
-          role: data.role,
-          is_active: true,
-          is_verified: true,
-          profile: {
-            id: data.user_id,
-            display_name: data.display_name || user.fullName || "Manager",
-            preferred_language: "en",
-            push_notifications_enabled: true,
-          },
-        });
-
-        router.push("/admin");
+        if (typeof window !== "undefined") sessionStorage.removeItem("mezflow_restaurant_draft");
+        signInAndOpenConsole(res.data, user.fullName || "Manager");
       } catch (e: any) {
         if (active) setError(e.message || "Failed to provision workspace.");
       } finally {
@@ -113,7 +115,7 @@ export default function SignUpPage() {
     return () => {
       active = false;
     };
-  }, [isSignedIn, user, router, setAuth]);
+  }, [isSignedIn, user, getToken]);
 
   // Google SSO Handler
   const handleGoogleSignUp = async () => {
@@ -124,8 +126,8 @@ export default function SignUpPage() {
         sessionStorage.setItem(
           "mezflow_restaurant_draft",
           JSON.stringify({
-            restaurant_name: restaurantName.trim() || "My Restaurant",
-            manager_name: managerName.trim() || "Manager",
+            restaurant_name: restaurantName.trim() || undefined,
+            manager_name: managerName.trim() || undefined,
             currency,
             phone: phone.trim() || undefined,
             address: address.trim() || undefined,
@@ -138,11 +140,26 @@ export default function SignUpPage() {
         redirectUrlComplete: "/signup",
       });
     } catch (err: any) {
-      setError(err.errors?.[0]?.message || "Failed to initiate Google registration.");
+      setError(
+        err.errors?.[0]?.longMessage ||
+          err.errors?.[0]?.message ||
+          "Failed to initiate Google registration."
+      );
     }
   };
 
-  // Submit Initial Registration (Creates account & triggers real email verification code)
+  const sendCode = () =>
+    apiClient.post("/auth/register-restaurant/start", {
+      restaurant_name: restaurantName.trim(),
+      manager_name: managerName.trim(),
+      email: email.trim(),
+      password,
+      currency: currency.toUpperCase(),
+      phone: phone.trim() || undefined,
+      address: address.trim() || undefined,
+    });
+
+  // Step 1: validate the form and e-mail a 6-digit code (nothing is created yet)
   const handleSubmitRegistration = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!restaurantName.trim() || !managerName.trim() || !email.trim() || !password) {
@@ -150,6 +167,15 @@ export default function SignUpPage() {
         isUrdu
           ? "براہ کرم تمام ضروری خانے پر کریں۔"
           : "Please fill in all required fields."
+      );
+      return;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim())) {
+      setError(
+        isUrdu
+          ? "ای میل درست نہیں ہے۔ مثال: name@gmail.com"
+          : "Email address is not valid. Please check it (e.g. name@gmail.com)."
       );
       return;
     }
@@ -167,109 +193,29 @@ export default function SignUpPage() {
     setLoading(true);
 
     try {
-      if (isLoaded && signUp) {
-        // 1. Create user account
-        await signUp.create({
-          emailAddress: email.trim(),
-          password,
-          firstName: managerName.trim().split(" ")[0],
-          lastName: managerName.trim().split(" ").slice(1).join(" ") || undefined,
-        });
-
-        // 2. Dispatch real 6-digit email verification code to user's inbox
-        await signUp.prepareEmailAddressVerification({
-          strategy: "email_code",
-        });
-
-        setPendingVerification(true);
-        setSuccessMsg(
-          isUrdu
-            ? `ہم نے ${email.trim()} پر ایک 6 ہندسوں کا تصدیقی کوڈ بھیجا ہے۔`
-            : `We've sent a 6-digit verification code to ${email.trim()}`
-        );
-      } else {
-        // Graceful direct registration fallback if auth provider is offline
-        await performDirectRegistration();
-      }
+      await sendCode();
+      setPendingVerification(true);
+      setSuccessMsg(
+        isUrdu
+          ? `ہم نے ${email.trim()} پر ایک 6 ہندسوں کا تصدیقی کوڈ بھیجا ہے۔`
+          : `We've sent a 6-digit verification code to ${email.trim()}`
+      );
     } catch (err: any) {
-      const code = err.errors?.[0]?.code;
-      if (code === "form_identifier_exists") {
-        setError(
-          isUrdu
-            ? "اس ای میل کے ساتھ پہلے سے اکاؤنٹ موجود ہے۔ برائے مہربانی لاگ ان کریں۔"
-            : "An account with this email already exists. Please sign in instead."
-        );
-      } else if (code === "form_password_pwned" || code === "form_password_length_too_short") {
-        setError(
-          err.errors?.[0]?.message || "Please choose a stronger password."
-        );
-      } else if (code === "form_param_format_invalid") {
-        setError("Please enter a valid email address.");
-      } else {
-        // If it's a provider or network issue, gracefully fall back to direct workspace registration so the user is never blocked
-        console.warn("Auth provider fallback to direct provisioning:", err);
-        await performDirectRegistration();
-      }
+      setError(
+        err.message ||
+          (isUrdu
+            ? "رجسٹریشن مکمل نہ ہو سکی۔ براہ کرم دوبارہ کوشش کریں۔"
+            : "Registration failed. Please check your details and try again.")
+      );
     } finally {
       setLoading(false);
     }
   };
 
-  // Direct backend provisioning fallback (used if auth provider client is unavailable)
-  const performDirectRegistration = async () => {
-    try {
-      const res = await apiClient.post("/auth/register-restaurant", {
-        restaurant_name: restaurantName.trim(),
-        manager_name: managerName.trim(),
-        email: email.trim(),
-        password,
-        currency: currency.toUpperCase(),
-        phone: phone.trim() || undefined,
-        address: address.trim() || undefined,
-      });
-
-      const data = res.data;
-      if (typeof window !== "undefined") {
-        localStorage.setItem("mezflow_token", data.access_token);
-      }
-
-      setAuth(data.access_token, {
-        id: data.user_id,
-        restaurant_id: data.restaurant_id,
-        role: data.role,
-        is_active: true,
-        is_verified: true,
-        profile: {
-          id: data.user_id,
-          display_name: data.display_name || managerName.trim(),
-          preferred_language: "en",
-          push_notifications_enabled: true,
-        },
-      });
-
-      setSuccessMsg(
-        isUrdu
-          ? "ورک اسپیس کامیابی سے بن گیا۔ کنسول پر منتقل ہو رہے ہیں..."
-          : "Workspace created successfully! Directing to manager console..."
-      );
-
-      setTimeout(() => {
-        router.push("/admin");
-      }, 800);
-    } catch (apiErr: any) {
-      setError(
-        apiErr.message ||
-          (isUrdu
-            ? "رجسٹریشن مکمل نہ ہو سکی۔ براہ کرم دوبارہ کوشش کریں۔"
-            : "Registration failed. Please check your details and try again.")
-      );
-    }
-  };
-
-  // Verify 6-digit Email Code & Provision Restaurant Workspace
+  // Step 2: verify the 6-digit code; the backend then creates the workspace and logs in
   const handleVerifyCode = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!verificationCode.trim()) {
+    if (!/^\d{6}$/.test(verificationCode.trim())) {
       setError(
         isUrdu
           ? "براہ کرم ای میل پر موصول شدہ 6 ہندسوں کا کوڈ درج کریں۔"
@@ -282,74 +228,21 @@ export default function SignUpPage() {
     setLoading(true);
 
     try {
-      if (!isLoaded || !signUp) {
-        throw new Error("Authentication client is not loaded. Please refresh.");
-      }
-
-      // 1. Verify 6-digit code
-      const completeSignUp = await signUp.attemptEmailAddressVerification({
+      const res = await apiClient.post("/auth/register-restaurant/verify", {
+        email: email.trim(),
         code: verificationCode.trim(),
       });
-
-      if (completeSignUp.status === "complete") {
-        // 2. Activate authenticated session
-        await setActive({ session: completeSignUp.createdSessionId });
-
-        // 3. Provision isolated restaurant tenant in PostgreSQL
-        const res = await apiClient.post("/auth/register-restaurant", {
-          restaurant_name: restaurantName.trim(),
-          manager_name: managerName.trim(),
-          email: email.trim(),
-          currency: currency.toUpperCase(),
-          phone: phone.trim() || undefined,
-          address: address.trim() || undefined,
-          clerk_user_id: completeSignUp.createdUserId,
-        });
-
-        const data = res.data;
-        if (typeof window !== "undefined") {
-          localStorage.setItem("mezflow_token", data.access_token);
-        }
-
-        setAuth(data.access_token, {
-          id: data.user_id,
-          restaurant_id: data.restaurant_id,
-          role: data.role,
-          is_active: true,
-          is_verified: true,
-          profile: {
-            id: data.user_id,
-            display_name: data.display_name || managerName.trim(),
-            preferred_language: "en",
-            push_notifications_enabled: true,
-          },
-        });
-
-        setSuccessMsg(
-          isUrdu
-            ? "ای میل کی تصدیق کامیاب! آپ کا ریستورانٹ ورک اسپیس فعال ہو گیا ہے۔"
-            : "Email verified! Your restaurant workspace is now live. Redirecting..."
-        );
-
-        setTimeout(() => {
-          router.push("/admin");
-        }, 800);
-      } else {
-        setError(
-          isUrdu
-            ? "تصدیق نامکمل ہے۔ براہ کرم کوڈ دوبارہ چیک کریں۔"
-            : "Verification could not be completed. Please re-check the code."
-        );
-      }
+      setSuccessMsg(
+        isUrdu
+          ? "ای میل کی تصدیق کامیاب! آپ کا ریستورانٹ ورک اسپیس فعال ہو گیا ہے۔"
+          : "Email verified! Your restaurant workspace is now live. Redirecting..."
+      );
+      setTimeout(() => signInAndOpenConsole(res.data, managerName.trim()), 800);
     } catch (err: any) {
-      const codeError =
-        err.errors?.[0]?.longMessage ||
-        err.errors?.[0]?.message ||
-        err.message;
       setError(
-        codeError ||
+        err.message ||
           (isUrdu
-            ? "غلط تصدیقی کوڈ۔ براہ کرم اپنے جی میل ان باکس کو چیک کریں۔"
+            ? "غلط تصدیقی کوڈ۔ براہ کرم اپنے ای میل ان باکس کو چیک کریں۔"
             : "Incorrect verification code. Please check your email inbox.")
       );
     } finally {
@@ -359,14 +252,13 @@ export default function SignUpPage() {
 
   // Resend 6-Digit Email Code
   const handleResendCode = async () => {
-    if (!isLoaded || !signUp || resending) return;
+    if (resending) return;
     setResending(true);
     setError(null);
 
     try {
-      await signUp.prepareEmailAddressVerification({
-        strategy: "email_code",
-      });
+      await sendCode();
+      setVerificationCode("");
       setSuccessMsg(
         isUrdu
           ? "ایک نیا تصدیقی کوڈ آپ کی ای میل پر بھیج دیا گیا ہے۔"
@@ -374,12 +266,21 @@ export default function SignUpPage() {
       );
     } catch (err: any) {
       setError(
-        err.errors?.[0]?.message ||
+        err.message ||
           (isUrdu ? "کوڈ دوبارہ بھیجنے میں ناکامی۔" : "Failed to resend code.")
       );
     } finally {
       setResending(false);
     }
+  };
+
+  const currencySymbol: Record<string, string> = {
+    PKR: "Rs",
+    USD: "$",
+    EUR: "€",
+    GBP: "£",
+    AED: "د.إ",
+    SAR: "﷼",
   };
 
   return (
@@ -496,7 +397,7 @@ export default function SignUpPage() {
                 <div className="border-t border-surface-border w-full" />
               </div>
 
-              <form onSubmit={handleSubmitRegistration} className="space-y-4 relative">
+              <form onSubmit={handleSubmitRegistration} onChange={() => setError(null)} className="space-y-4 relative">
               {/* Restaurant Name */}
               <div>
                 <label className="block text-xs font-medium text-slate-300 mb-1.5">
@@ -539,7 +440,9 @@ export default function SignUpPage() {
                     {isUrdu ? "کرنسی *" : "Operating Currency *"}
                   </label>
                   <div className="relative">
-                    <DollarSign className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <span className="text-[11px] font-bold text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none">
+                      {currencySymbol[currency] || currency}
+                    </span>
                     <select
                       value={currency}
                       onChange={(e) => setCurrency(e.target.value)}
@@ -568,7 +471,7 @@ export default function SignUpPage() {
                     required
                     placeholder="manager@restaurant.com"
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    onChange={(e) => setEmail(e.target.value.toLowerCase())}
                     className="w-full bg-surface-dark border border-surface-border rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-all"
                   />
                 </div>
@@ -682,7 +585,7 @@ export default function SignUpPage() {
 
           {/* PHASE 2: CUSTOM 6-DIGIT EMAIL VERIFICATION SCREEN */}
           {pendingVerification && (
-            <form onSubmit={handleVerifyCode} className="space-y-5 relative">
+            <form onSubmit={handleVerifyCode} onChange={() => setError(null)} className="space-y-5 relative">
               {/* Back to Edit Button */}
               <button
                 type="button"

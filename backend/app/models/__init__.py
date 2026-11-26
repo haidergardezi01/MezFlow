@@ -5,6 +5,7 @@ from app.models.user import User, UserProfile, UserRole
 from app.models.table import Table, TableStatus
 from app.models.menu import MenuCategory, MenuItem, ItemModifierGroup, ModifierOption
 from app.models.audit import AuditLog
+from app.models.pending_registration import PendingRegistration
 from app.models.session import TableSession, SessionStatus, Diner, CartItem, CartItemModifier
 from app.models.order import (
     Order,
@@ -28,6 +29,7 @@ __all__ = [
     "ItemModifierGroup",
     "ModifierOption",
     "AuditLog",
+    "PendingRegistration",
     "TableSession",
     "SessionStatus",
     "Diner",

@@ -92,8 +92,33 @@ apiClient.interceptors.response.use(
       }
     }
 
+    // FastAPI validation errors (422) send detail as a list of {loc, msg}; show the messages, not "[object Object]"
+    const detail: unknown = error.response?.data?.detail;
+    const fieldMessages: Record<string, string> = {
+      email: "Email address is not valid. Please check it (e.g. name@gmail.com).",
+      username: "Please enter your email address.",
+      password: "Password is too short. Use at least 8 characters.",
+      new_password: "New password is too short.",
+      code: "The code must be exactly 6 digits.",
+      restaurant_name: "Restaurant name must be at least 2 characters.",
+      manager_name: "Owner name must be at least 2 characters.",
+    };
+    const detailText = Array.isArray(detail)
+      ? Array.from(
+          new Set(
+            detail.map((d: any) => {
+              const field = Array.isArray(d?.loc) ? String(d.loc[d.loc.length - 1]) : "";
+              return fieldMessages[field] || String(d?.msg || "").replace(/^Value error, /, "");
+            })
+          )
+        )
+          .filter(Boolean)
+          .join(" ")
+      : typeof detail === "string"
+        ? detail
+        : "";
     const message =
-      error.response?.data?.detail ||
+      detailText ||
       error.message ||
       "An unexpected network error occurred.";
     return Promise.reject(new Error(message));
